@@ -1,0 +1,157 @@
+name: quant-intelligence-platform
+
+x-api-image: &api-image
+  build:
+    context: .
+    dockerfile: docker/api.Dockerfile
+    args:
+      # docker compose build --build-arg GIT_COMMIT=$(git rev-parse --short HEAD)
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
+  # Optional so a fresh clone can `docker compose config` before copying .env.
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    QIP_DATABASE_URL: postgresql+asyncpg://qip:qip@postgres:5432/qip
+    QIP_REDIS_URL: redis://redis:6379/0
+    QIP_CELERY_BROKER_URL: redis://redis:6379/1
+    QIP_CELERY_RESULT_BACKEND: redis://redis:6379/2
+    QIP_OBJECT_STORE_BACKEND: s3
+    QIP_S3_ENDPOINT_URL: http://minio:9000
+  volumes:
+    - objectstore:/var/qip/objectstore
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    minio: {condition: service_healthy}
+
+services:
+  postgres:
+    # TimescaleDB is optional: migration 0002 detects the extension and falls
+    # back to plain tables when it is absent.
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_USER: qip
+      POSTGRES_PASSWORD: qip
+      POSTGRES_DB: qip
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qip -d qip"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Not published on the host: nothing outside the compose network needs it.
+    expose: ["5432"]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    expose: ["6379"]
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${QIP_S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${QIP_S3_SECRET_KEY:-minioadmin}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "9001:9001"   # console only
+    expose: ["9000"]
+
+  createbucket:
+    image: minio/mc:latest
+    depends_on:
+      minio: {condition: service_healthy}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${QIP_S3_ACCESS_KEY:-minioadmin} $${QIP_S3_SECRET_KEY:-minioadmin} &&
+      mc mb --ignore-existing local/$${QIP_S3_BUCKET:-qip}
+      "
+    environment:
+      QIP_S3_ACCESS_KEY: ${QIP_S3_ACCESS_KEY:-minioadmin}
+      QIP_S3_SECRET_KEY: ${QIP_S3_SECRET_KEY:-minioadmin}
+      QIP_S3_BUCKET: ${QIP_S3_BUCKET:-qip}
+
+  migrate:
+    <<: *api-image
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  api:
+    <<: *api-image
+    command:
+      ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      QIP_JOB_EXECUTION_MODE: queue
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
+  worker:
+    <<: *api-image
+    command:
+      ["celery", "-A", "apps.worker.tasks", "worker", "--loglevel=INFO", "--concurrency=2"]
+    environment:
+      QIP_JOB_EXECUTION_MODE: queue
+    # The worker is the memory-hungry process (Monte Carlo, historical
+    # repricing); capping it keeps a heavy job from starving the API.
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
+  scheduler:
+    <<: *api-image
+    command:
+      ["celery", "-A", "apps.scheduler.beat", "beat", "--loglevel=INFO"]
+    environment:
+      QIP_JOB_EXECUTION_MODE: queue
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  proxy:
+    image: caddy:2-alpine
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+      - web
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  objectstore:
+  caddydata:

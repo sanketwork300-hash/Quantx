@@ -1,0 +1,559 @@
+{
+  "aggregate_quality": {
+    "completeness_score": 1.0,
+    "consistency_score": 1.0,
+    "liquidity_score": 0.923430369692,
+    "overall_score": 0.944767139282,
+    "spread_score": 0.815116610105,
+    "stale_score": 1.0
+  },
+  "counts": {
+    "excluded": 6,
+    "input": 31,
+    "kept": 20,
+    "rejected": 5
+  },
+  "exclusion_counts": {
+    "CROSSED_MARKET": 1,
+    "DUPLICATE_OBSERVATION": 1,
+    "MISSING_BOTH_SIDES": 1,
+    "NEGATIVE_PRICE": 1,
+    "PRICE_BELOW_INTRINSIC": 1,
+    "ZERO_ASK": 1
+  },
+  "flag_counts": {
+    "CROSSED_MARKET": 2,
+    "DUPLICATE_OBSERVATION": 1,
+    "ILLIQUID_CONTRACT": 1,
+    "MISSING_BOTH_SIDES": 1,
+    "MISSING_SEQUENCE": 26,
+    "NEGATIVE_PRICE": 1,
+    "PRICE_BELOW_INTRINSIC": 2,
+    "WIDE_SPREAD": 2,
+    "ZERO_ASK": 1
+  },
+  "model_versions": {
+    "ingestion": "option-chain-ingestion@1.0.0",
+    "quality": "market-data-quality@1.0.0"
+  },
+  "quotes": [
+    {
+      "excluded": true,
+      "exclusion_reason": "PRICE_BELOW_INTRINSIC",
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE",
+        "PRICE_BELOW_INTRINSIC",
+        "WIDE_SPREAD"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 0.2,
+        "liquidity": 0.938737715624,
+        "overall": 0.21010311863,
+        "spread": 0.004876107075,
+        "stale": 1.0
+      },
+      "source_row_number": 25,
+      "strike": "20000"
+    },
+    {
+      "excluded": true,
+      "exclusion_reason": "CROSSED_MARKET",
+      "expiry": "2026-10-29",
+      "flags": [
+        "CROSSED_MARKET",
+        "MISSING_SEQUENCE",
+        "PRICE_BELOW_INTRINSIC"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 0.0,
+        "liquidity": 0.938737715624,
+        "overall": 0.0,
+        "spread": 1.0,
+        "stale": 1.0
+      },
+      "source_row_number": 1,
+      "strike": "22600"
+    },
+    {
+      "excluded": true,
+      "exclusion_reason": "ZERO_ASK",
+      "expiry": "2026-10-29",
+      "flags": [
+        "CROSSED_MARKET",
+        "MISSING_SEQUENCE",
+        "ZERO_ASK"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 0.0,
+        "liquidity": 0.938737715624,
+        "overall": 0.0,
+        "spread": 0.0,
+        "stale": 1.0
+      },
+      "source_row_number": 2,
+      "strike": "22600"
+    },
+    {
+      "excluded": true,
+      "exclusion_reason": "MISSING_BOTH_SIDES",
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_BOTH_SIDES",
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 0.6,
+        "consistency": 1.0,
+        "liquidity": 0.946802224827,
+        "overall": 0.0,
+        "spread": 0.0,
+        "stale": 1.0
+      },
+      "source_row_number": 3,
+      "strike": "22800"
+    },
+    {
+      "excluded": true,
+      "exclusion_reason": "NEGATIVE_PRICE",
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE",
+        "NEGATIVE_PRICE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 0.0,
+        "liquidity": 0.946802224827,
+        "overall": 0.0,
+        "spread": 0.0,
+        "stale": 1.0
+      },
+      "source_row_number": 4,
+      "strike": "22800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.952855634992,
+        "overall": 0.940373167918,
+        "spread": 0.771745377576,
+        "stale": 1.0
+      },
+      "source_row_number": 5,
+      "strike": "23000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.952855634992,
+        "overall": 0.943001723929,
+        "spread": 0.782591860778,
+        "stale": 1.0
+      },
+      "source_row_number": 6,
+      "strike": "23000"
+    },
+    {
+      "excluded": true,
+      "exclusion_reason": "DUPLICATE_OBSERVATION",
+      "expiry": "2026-10-29",
+      "flags": [
+        "DUPLICATE_OBSERVATION",
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 0.7,
+        "liquidity": 0.952855634992,
+        "overall": 0.847309154599,
+        "spread": 0.782591860778,
+        "stale": 1.0
+      },
+      "source_row_number": 26,
+      "strike": "23000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE",
+        "WIDE_SPREAD"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.957387667235,
+        "overall": 0.254257646758,
+        "spread": 0.001109896002,
+        "stale": 1.0
+      },
+      "source_row_number": 7,
+      "strike": "23200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "ILLIQUID_CONTRACT",
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.184615384615,
+        "overall": 0.680176729889,
+        "spread": 0.78857128699,
+        "stale": 1.0
+      },
+      "source_row_number": 8,
+      "strike": "23200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.960697337431,
+        "overall": 0.954972397289,
+        "spread": 0.826737252252,
+        "stale": 1.0
+      },
+      "source_row_number": 9,
+      "strike": "23400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.960697337431,
+        "overall": 0.956517961171,
+        "spread": 0.833449058479,
+        "stale": 1.0
+      },
+      "source_row_number": 10,
+      "strike": "23400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.963048710522,
+        "overall": 0.961464143143,
+        "spread": 0.853133915763,
+        "stale": 1.0
+      },
+      "source_row_number": 11,
+      "strike": "23600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.963048710522,
+        "overall": 0.962011839391,
+        "spread": 0.855566616437,
+        "stale": 1.0
+      },
+      "source_row_number": 12,
+      "strike": "23600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.964566223309,
+        "overall": 0.967574379882,
+        "spread": 0.87920419477,
+        "stale": 1.0
+      },
+      "source_row_number": 13,
+      "strike": "23800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.964566223309,
+        "overall": 0.968153955298,
+        "spread": 0.88184056036,
+        "stale": 1.0
+      },
+      "source_row_number": 14,
+      "strike": "23800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965379944763,
+        "overall": 0.972401887479,
+        "spread": 0.900597409568,
+        "stale": 1.0
+      },
+      "source_row_number": 15,
+      "strike": "24000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965379944763,
+        "overall": 0.972565604525,
+        "spread": 0.901355803837,
+        "stale": 1.0
+      },
+      "source_row_number": 16,
+      "strike": "24000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965545319065,
+        "overall": 0.974938704715,
+        "spread": 0.91225005368,
+        "stale": 1.0
+      },
+      "source_row_number": 17,
+      "strike": "24200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965545319065,
+        "overall": 0.975038742311,
+        "spread": 0.912718175581,
+        "stale": 1.0
+      },
+      "source_row_number": 18,
+      "strike": "24200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965069122474,
+        "overall": 0.96913066998,
+        "spread": 0.885835883586,
+        "stale": 1.0
+      },
+      "source_row_number": 19,
+      "strike": "24400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965069122474,
+        "overall": 0.96953190809,
+        "spread": 0.88767116524,
+        "stale": 1.0
+      },
+      "source_row_number": 20,
+      "strike": "24400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.963958738401,
+        "overall": 0.965128768672,
+        "spread": 0.868696080397,
+        "stale": 1.0
+      },
+      "source_row_number": 21,
+      "strike": "24600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.963958738401,
+        "overall": 0.96487571657,
+        "spread": 0.867557837854,
+        "stale": 1.0
+      },
+      "source_row_number": 22,
+      "strike": "24600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.962181140035,
+        "overall": 0.960698558315,
+        "spread": 0.850508885043,
+        "stale": 1.0
+      },
+      "source_row_number": 23,
+      "strike": "24800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.962181140035,
+        "overall": 0.958584229825,
+        "spread": 0.841190887916,
+        "stale": 1.0
+      },
+      "source_row_number": 24,
+      "strike": "24800"
+    }
+  ],
+  "rejection_counts": {
+    "MISSING_EXPIRY": 1,
+    "MISSING_OPTION_TYPE": 1,
+    "NON_POSITIVE_STRIKE": 1,
+    "NO_PRICE_FIELDS": 1,
+    "UNPARSEABLE_ROW": 1
+  },
+  "status": "OK",
+  "warning_codes": [
+    "INGESTION_CARRY_ASSUMPTION_USED",
+    "INGESTION_EXPIRY_TIME_ASSUMED",
+    "INGESTION_ROWS_REJECTED"
+  ]
+}

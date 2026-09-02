@@ -1,0 +1,1172 @@
+{
+  "aggregate_quality": {
+    "completeness_score": 1.0,
+    "consistency_score": 1.0,
+    "liquidity_score": 0.957345659394,
+    "overall_score": 0.953475385853,
+    "spread_score": 0.823149385153,
+    "stale_score": 1.0
+  },
+  "counts": {
+    "excluded": 0,
+    "input": 60,
+    "kept": 60,
+    "rejected": 0
+  },
+  "exclusion_counts": {},
+  "flag_counts": {
+    "MISSING_SEQUENCE": 60
+  },
+  "model_versions": {
+    "ingestion": "option-chain-ingestion@1.0.0",
+    "quality": "market-data-quality@1.0.0"
+  },
+  "quotes": [
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.938737715624,
+        "overall": 0.923274596223,
+        "spread": 0.714677589631,
+        "stale": 1.0
+      },
+      "source_row_number": 1,
+      "strike": "22600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.938737715624,
+        "overall": 0.935024217955,
+        "spread": 0.761324895055,
+        "stale": 1.0
+      },
+      "source_row_number": 2,
+      "strike": "22600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.946802224827,
+        "overall": 0.9323002712,
+        "spread": 0.743908948696,
+        "stale": 1.0
+      },
+      "source_row_number": 3,
+      "strike": "22800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.946802224827,
+        "overall": 0.933440007939,
+        "spread": 0.748467222135,
+        "stale": 1.0
+      },
+      "source_row_number": 4,
+      "strike": "22800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.952855634992,
+        "overall": 0.940373167918,
+        "spread": 0.771745377576,
+        "stale": 1.0
+      },
+      "source_row_number": 5,
+      "strike": "23000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.952855634992,
+        "overall": 0.943001723929,
+        "spread": 0.782591860778,
+        "stale": 1.0
+      },
+      "source_row_number": 6,
+      "strike": "23000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.957387667235,
+        "overall": 0.947801197122,
+        "spread": 0.798911064152,
+        "stale": 1.0
+      },
+      "source_row_number": 7,
+      "strike": "23200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.957387667235,
+        "overall": 0.945335044021,
+        "spread": 0.78857128699,
+        "stale": 1.0
+      },
+      "source_row_number": 8,
+      "strike": "23200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.960697337431,
+        "overall": 0.954972397289,
+        "spread": 0.826737252252,
+        "stale": 1.0
+      },
+      "source_row_number": 9,
+      "strike": "23400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.960697337431,
+        "overall": 0.956517961171,
+        "spread": 0.833449058479,
+        "stale": 1.0
+      },
+      "source_row_number": 10,
+      "strike": "23400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.963048710522,
+        "overall": 0.961464143143,
+        "spread": 0.853133915763,
+        "stale": 1.0
+      },
+      "source_row_number": 11,
+      "strike": "23600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.963048710522,
+        "overall": 0.962011839391,
+        "spread": 0.855566616437,
+        "stale": 1.0
+      },
+      "source_row_number": 12,
+      "strike": "23600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.964566223309,
+        "overall": 0.967574379882,
+        "spread": 0.87920419477,
+        "stale": 1.0
+      },
+      "source_row_number": 13,
+      "strike": "23800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.964566223309,
+        "overall": 0.968153955298,
+        "spread": 0.88184056036,
+        "stale": 1.0
+      },
+      "source_row_number": 14,
+      "strike": "23800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965379944763,
+        "overall": 0.972401887479,
+        "spread": 0.900597409568,
+        "stale": 1.0
+      },
+      "source_row_number": 15,
+      "strike": "24000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965379944763,
+        "overall": 0.972565604525,
+        "spread": 0.901355803837,
+        "stale": 1.0
+      },
+      "source_row_number": 16,
+      "strike": "24000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965545319065,
+        "overall": 0.974938704715,
+        "spread": 0.91225005368,
+        "stale": 1.0
+      },
+      "source_row_number": 17,
+      "strike": "24200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965545319065,
+        "overall": 0.975038742311,
+        "spread": 0.912718175581,
+        "stale": 1.0
+      },
+      "source_row_number": 18,
+      "strike": "24200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965069122474,
+        "overall": 0.96913066998,
+        "spread": 0.885835883586,
+        "stale": 1.0
+      },
+      "source_row_number": 19,
+      "strike": "24400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965069122474,
+        "overall": 0.96953190809,
+        "spread": 0.88767116524,
+        "stale": 1.0
+      },
+      "source_row_number": 20,
+      "strike": "24400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.963958738401,
+        "overall": 0.965128768672,
+        "spread": 0.868696080397,
+        "stale": 1.0
+      },
+      "source_row_number": 21,
+      "strike": "24600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.963958738401,
+        "overall": 0.96487571657,
+        "spread": 0.867557837854,
+        "stale": 1.0
+      },
+      "source_row_number": 22,
+      "strike": "24600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.962181140035,
+        "overall": 0.960698558315,
+        "spread": 0.850508885043,
+        "stale": 1.0
+      },
+      "source_row_number": 23,
+      "strike": "24800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.962181140035,
+        "overall": 0.958584229825,
+        "spread": 0.841190887916,
+        "stale": 1.0
+      },
+      "source_row_number": 24,
+      "strike": "24800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.959642781015,
+        "overall": 0.952323121839,
+        "spread": 0.816229042932,
+        "stale": 1.0
+      },
+      "source_row_number": 25,
+      "strike": "25000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.959642781015,
+        "overall": 0.952439884645,
+        "spread": 0.816729548303,
+        "stale": 1.0
+      },
+      "source_row_number": 26,
+      "strike": "25000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.956240668679,
+        "overall": 0.947728580432,
+        "spread": 0.799562981038,
+        "stale": 1.0
+      },
+      "source_row_number": 27,
+      "strike": "25200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.956240668679,
+        "overall": 0.945971954691,
+        "spread": 0.792180403636,
+        "stale": 1.0
+      },
+      "source_row_number": 28,
+      "strike": "25200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.951835824859,
+        "overall": 0.93483706104,
+        "spread": 0.750097227797,
+        "stale": 1.0
+      },
+      "source_row_number": 29,
+      "strike": "25400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-10-29",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.951835824859,
+        "overall": 0.938847273157,
+        "spread": 0.766324480578,
+        "stale": 1.0
+      },
+      "source_row_number": 30,
+      "strike": "25400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.926563930065,
+        "overall": 0.912495849767,
+        "spread": 0.682777340517,
+        "stale": 1.0
+      },
+      "source_row_number": 31,
+      "strike": "22600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.926563930065,
+        "overall": 0.91333849822,
+        "spread": 0.685935737645,
+        "stale": 1.0
+      },
+      "source_row_number": 32,
+      "strike": "22600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.937487997398,
+        "overall": 0.921911232143,
+        "spread": 0.710362153374,
+        "stale": 1.0
+      },
+      "source_row_number": 33,
+      "strike": "22800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.937487997398,
+        "overall": 0.921474268614,
+        "spread": 0.708680276443,
+        "stale": 1.0
+      },
+      "source_row_number": 34,
+      "strike": "22800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.945775780399,
+        "overall": 0.930987988177,
+        "spread": 0.739489820256,
+        "stale": 1.0
+      },
+      "source_row_number": 35,
+      "strike": "23000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.945775780399,
+        "overall": 0.930433918948,
+        "spread": 0.737291933938,
+        "stale": 1.0
+      },
+      "source_row_number": 36,
+      "strike": "23000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.95203762382,
+        "overall": 0.939274989205,
+        "spread": 0.767908861488,
+        "stale": 1.0
+      },
+      "source_row_number": 37,
+      "strike": "23200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.95203762382,
+        "overall": 0.939357710813,
+        "spread": 0.768247068329,
+        "stale": 1.0
+      },
+      "source_row_number": 38,
+      "strike": "23200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.956732649367,
+        "overall": 0.94671284621,
+        "spread": 0.794878510829,
+        "stale": 1.0
+      },
+      "source_row_number": 39,
+      "strike": "23400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.956732649367,
+        "overall": 0.947707670082,
+        "spread": 0.799063664585,
+        "stale": 1.0
+      },
+      "source_row_number": 40,
+      "strike": "23400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.960214495159,
+        "overall": 0.953850828524,
+        "spread": 0.822307116274,
+        "stale": 1.0
+      },
+      "source_row_number": 41,
+      "strike": "23600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.960214495159,
+        "overall": 0.953929427277,
+        "spread": 0.822645968875,
+        "stale": 1.0
+      },
+      "source_row_number": 42,
+      "strike": "23600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.962690395355,
+        "overall": 0.960274481263,
+        "spread": 0.84818443902,
+        "stale": 1.0
+      },
+      "source_row_number": 43,
+      "strike": "23800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.962690395355,
+        "overall": 0.959674258258,
+        "spread": 0.845536947125,
+        "stale": 1.0
+      },
+      "source_row_number": 44,
+      "strike": "23800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.964332686074,
+        "overall": 0.96618315861,
+        "spread": 0.87311294665,
+        "stale": 1.0
+      },
+      "source_row_number": 45,
+      "strike": "24000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.964332686074,
+        "overall": 0.966298774631,
+        "spread": 0.873635466655,
+        "stale": 1.0
+      },
+      "source_row_number": 46,
+      "strike": "24000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965278353818,
+        "overall": 0.971388290167,
+        "spread": 0.896007720869,
+        "stale": 1.0
+      },
+      "source_row_number": 47,
+      "strike": "24200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965278353818,
+        "overall": 0.971520951913,
+        "spread": 0.896619723406,
+        "stale": 1.0
+      },
+      "source_row_number": 48,
+      "strike": "24200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965557921567,
+        "overall": 0.976066426348,
+        "spread": 0.917526342894,
+        "stale": 1.0
+      },
+      "source_row_number": 49,
+      "strike": "24400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.965557921567,
+        "overall": 0.97557188551,
+        "spread": 0.915204294609,
+        "stale": 1.0
+      },
+      "source_row_number": 50,
+      "strike": "24400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.96523413839,
+        "overall": 0.971123155261,
+        "spread": 0.894826575478,
+        "stale": 1.0
+      },
+      "source_row_number": 51,
+      "strike": "24600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.96523413839,
+        "overall": 0.971139034537,
+        "spread": 0.894899736451,
+        "stale": 1.0
+      },
+      "source_row_number": 52,
+      "strike": "24600"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.964279278196,
+        "overall": 0.965918451216,
+        "spread": 0.871965850455,
+        "stale": 1.0
+      },
+      "source_row_number": 53,
+      "strike": "24800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.964279278196,
+        "overall": 0.965718642355,
+        "spread": 0.871064353864,
+        "stale": 1.0
+      },
+      "source_row_number": 54,
+      "strike": "24800"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.962667060364,
+        "overall": 0.960328969972,
+        "spread": 0.848445674105,
+        "stale": 1.0
+      },
+      "source_row_number": 55,
+      "strike": "25000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.962667060364,
+        "overall": 0.960366047567,
+        "spread": 0.848609476072,
+        "stale": 1.0
+      },
+      "source_row_number": 56,
+      "strike": "25000"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.960353281018,
+        "overall": 0.953726493314,
+        "spread": 0.821652555436,
+        "stale": 1.0
+      },
+      "source_row_number": 57,
+      "strike": "25200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.960353281018,
+        "overall": 0.954111326786,
+        "spread": 0.823311598605,
+        "stale": 1.0
+      },
+      "source_row_number": 58,
+      "strike": "25200"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "CALL",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.9572151376,
+        "overall": 0.948034077099,
+        "spread": 0.800037204543,
+        "stale": 1.0
+      },
+      "source_row_number": 59,
+      "strike": "25400"
+    },
+    {
+      "excluded": false,
+      "exclusion_reason": null,
+      "expiry": "2026-12-24",
+      "flags": [
+        "MISSING_SEQUENCE"
+      ],
+      "option_type": "PUT",
+      "scores": {
+        "completeness": 1.0,
+        "consistency": 1.0,
+        "liquidity": 0.9572151376,
+        "overall": 0.947811392948,
+        "spread": 0.799098040354,
+        "stale": 1.0
+      },
+      "source_row_number": 60,
+      "strike": "25400"
+    }
+  ],
+  "rejection_counts": {},
+  "status": "OK",
+  "warning_codes": [
+    "INGESTION_CARRY_ASSUMPTION_USED",
+    "INGESTION_EXPIRY_TIME_ASSUMED"
+  ]
+}

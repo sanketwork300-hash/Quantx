@@ -1,0 +1,18 @@
+Quant Intelligence Platform
+Copyright 2026 The Quant Intelligence Platform contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product validates its numerical implementations against, but does not
+distribute code from, the following projects. See docs/references.md for the
+per-feature reuse decision, and re-verify each licence at the pinned version
+before vendoring anything.
+
+  - QuantLib           (lballabio/QuantLib)        -- modified BSD
+  - vollib / py_vollib (vollib/py_vollib)          -- MIT
+  - Riskfolio-Lib      (dcajasn/Riskfolio-Lib)     -- BSD-3-Clause
+
+Architectural concepts were adapted from NautilusTrader
+(nautechsystems/nautilus_trader, LGPL-3.0) and ABIDES
+(jpmorganchase/abides-jpmc-public). No code from either project is included,
+and neither is a runtime dependency.
