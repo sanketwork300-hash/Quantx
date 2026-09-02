@@ -1,0 +1,43 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import "./globals.css";
+import { Providers } from "./providers";
+
+export const metadata: Metadata = {
+  title: "Quant Intelligence Platform",
+  description:
+    "Derivatives valuation, portfolio risk and execution intelligence. Analytics, not advice.",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <Providers>
+          <div className="shell">
+            <aside className="sidebar">
+              <h1>Quant Intelligence</h1>
+              <div className="tagline">Analytics, not advice</div>
+              <nav>
+                <Link href="/">Dashboard</Link>
+                <div className="group">Markets</div>
+                <Link href="/markets/chains">Option chains</Link>
+                <Link href="/markets/analyses">Volatility analyses</Link>
+                <Link href="/markets/surfaces">Surfaces</Link>
+                <div className="group">Data</div>
+                <Link href="/data">Imports</Link>
+                <div className="group">Account</div>
+                <Link href="/login">Sign in</Link>
+              </nav>
+            </aside>
+            <main className="main">{children}</main>
+          </div>
+        </Providers>
+      </body>
+    </html>
+  );
+}

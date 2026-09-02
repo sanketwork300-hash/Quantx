@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,validation]"
+
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+
+      # The layering rules are what keep quant/ testable without infrastructure
+      # and make a later service extraction mechanical. Enforced, not documented.
+      - name: Architecture layering
+        run: python scripts/check_layering.py
+
+      - name: Types
+        run: mypy quant domains || true   # advisory until annotations are complete
+
+      - name: Unit and integration tests
+        run: pytest -q -m "not performance"
+
+      - name: Quantitative validation against reference libraries
+        run: pytest -q -m requires_reference_libs
+
+      - name: Regression golden files
+        run: pytest -q -m regression
+
+      - name: Migrations are reversible
+        env:
+          QIP_DATABASE_URL: sqlite+aiosqlite:///./var/ci.db
+        run: |
+          mkdir -p var
+          alembic upgrade head
+          alembic downgrade base
+
+  migrations-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: qip
+          POSTGRES_PASSWORD: qip
+          POSTGRES_DB: qip
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U qip" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Upgrade and downgrade on PostgreSQL
+        env:
+          QIP_DATABASE_URL: postgresql+asyncpg://qip:qip@localhost:5432/qip
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm run build

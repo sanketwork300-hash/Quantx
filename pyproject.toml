@@ -1,0 +1,90 @@
+[project]
+name = "quant-intelligence-platform"
+version = "0.1.0"
+description = "Derivatives valuation, portfolio risk and execution intelligence for independent quants."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+
+dependencies = [
+    # --- web / application ---
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic[email]>=2.7",
+    "pydantic-settings>=2.3",
+    "python-multipart>=0.0.9",
+    # --- persistence ---
+    "sqlalchemy>=2.0.30",
+    "alembic>=1.13",
+    "asyncpg>=0.29",
+    "greenlet>=3.0",
+    # --- infrastructure ---
+    "redis>=5.0",
+    "celery>=5.4",
+    "structlog>=24.1",
+    # --- security ---
+    "bcrypt>=4.1",
+    "pyjwt>=2.8",
+    # --- quant / data ---
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pandas>=2.2",
+    "polars>=1.0",
+    "pyarrow>=16.0",
+    "duckdb>=1.0",
+]
+
+[project.optional-dependencies]
+# Reference libraries used for cross-validation of our own implementations
+# (see docs/references.md). Not required for the platform to run.
+validation = [
+    "QuantLib>=1.34",
+    "vollib>=1.0.2",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "hypothesis>=6.100",
+    "httpx>=0.27",
+    "aiosqlite>=0.20",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["apps", "api", "domains", "quant", "infrastructure"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning:py_vollib.*",
+]
+markers = [
+    "quant_validation: numerical correctness tests against analytic or reference-library values",
+    "regression: golden-file tests that must not drift beyond tolerance",
+    "performance: benchmarks, not run in the default suite",
+    "requires_reference_libs: needs QuantLib / vollib installed",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "N"]
+# B008: FastAPI Depends() in argument defaults is idiomatic.
+# N818: domain exceptions read better without an "Error" suffix
+#       (InvalidInstrument, UploadRejected) and are always caught by type.
+# N813: `import QuantLib as ql` is that library's universal convention.
+ignore = ["B008", "N818", "N813"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+disallow_untyped_defs = false
+plugins = []
