@@ -110,9 +110,86 @@ Invariants worth stating as properties:
 - A fitted slice's `g(k)` is non-negative across the checked grid.
 - An anomaly's `explained_scale` grows when the market widens or the fit worsens.
 - Confidence stays within `[0, 1]` for every combination of inputs.
-- Portfolio aggregation: the sum over positions equals the portfolio total
-  within tolerance _(Phase 4)_.
+- Portfolio aggregation: the sum over positions equals the portfolio total, for
+  value and for every Greek, over arbitrary mixes of long and short, quoted and
+  unquoted legs (`test_portfolio_valuation.py::TestSumProperty`). The value is
+  compared exactly because it is `Decimal` throughout; the Greeks are float sums
+  and are compared to float tolerance.
+- Every position carries a `valuation_method`, and `base_market_value is None`
+  exactly when that method is `UNAVAILABLE` — so an unpriced position can never
+  be counted as worth zero.
+- Position import conserves rows: `input == resolved + ambiguous + invalid`.
+- A margin estimate is never negative and its confidence is always in `[0, 1]`,
+  for any mix of long and short legs (`test_margin.py`).
+- A schedule's slices sum to the parent quantity exactly, for arbitrary weights,
+  totals and lot sizes (`test_execution_simulation.py`). Exactly, not to a
+  tolerance: `Decimal` throughout, and `Schedule.__post_init__` raises otherwise.
+- Every simulated result carries the counterfactual label, for any latency.
+- A parent order's average price always lies between its best and worst fill,
+  and a shortfall measured against that same average is always exactly zero
+  (`test_tca.py`). The second is the check that the thing being measured cannot
+  be its own benchmark.
+- A Monte Carlo run is reproducible from its seed, for every path count and seed
+  (`test_var.py::TestSimulation::test_every_run_is_reproducible`).
+- The vectorised repricing agrees with the scalar one for any spot and
+  volatility shock (`test_revaluation.py::TestVectorisedAgreesWithScalar`).
 - Execution schedules sum to the parent quantity _(Phase 8)_.
+- SSVI total variance at the money equals `theta` exactly, and the analytic
+  strike derivatives match a Richardson-extrapolated finite difference
+  (`test_ssvi.py`). The reference is extrapolated rather than differenced at one
+  step because the second difference is squeezed from both sides — cancellation
+  at a small step, a sharply peaked curvature at a large one.
+- A fitted SSVI term structure is non-decreasing, for any observed input,
+  including an inverted one.
+- A local-volatility grid conserves its points: `total = valid + flagged`, and
+  every invalid point carries at least one flag.
+- Every model in a consensus carries exactly one of a value and an
+  unavailability reason.
+
+### Testing an order of convergence, not an error
+
+Phase 9's PDE criterion is the *rate* at which the error falls under refinement,
+not its size. A coarse grid can be close by luck and a wrong scheme can be close
+on one contract; only the order separates a correct second-order scheme from an
+incorrect one. `tests/quant_validation/test_pde.py` refines the grid four times,
+fits a slope in log-log, and requires at least 1.8 for price, delta and gamma on
+both a uniform and a concentrated grid.
+
+It earned its place on the first run: gamma came back at order 1.0 because the
+solution was interpolated with a three-point quadratic, whose second derivative
+is accurate only to `O(h)`. The price and the delta looked correct throughout.
+
+The same file holds the Dupire round trip — a local-volatility surface must
+reprice the implied surface it was derived from — which found two further errors
+that no other test could see, both described in `docs/architecture.md` §23.
+
+### Testing an absence
+
+Phase 6's acceptance criteria are mostly about numbers the platform must *not*
+produce, which needs a different kind of test. Three shapes are used:
+
+- **Scan the serialised payload.** `test_margin.py` renders the whole result to
+  a string and asserts that venue names and affirmative claims do not appear in
+  it. This catches a phrase added to a docstring or an assumption three layers
+  down, which an assertion on a named field would not.
+- **Test the construction, not the word.** "Liquidation" is allowed to appear,
+  because the sentence doing the most work is the one that denies it. The test
+  walks every occurrence and requires "not a broker" immediately before it.
+  Banning the substring outright would have forbidden the disclaimer.
+- **Assert the absence of fields.** `required_margin`, `broker_margin` and
+  `exchange_margin` must not be keys of the result payload, so a future addition
+  has to delete a test to land. Phase 9 does the same for the consensus:
+  `best_model`, `true_price`, `fair_value`, `recommendation` and `signal` are
+  checked against every key at every depth of the serialised response.
+
+### Two invariants that exist to catch a future change
+
+A null scenario reprices to **exactly** the base value, and every scenario's
+risk contributions sum to the total with a zero residual. Both hold by
+construction today. They are asserted anyway, because both stop holding the
+moment something portfolio-level and non-additive — netted margin, in Phase 6 —
+enters the revaluation, and it is better for a test to say so than for a number
+to quietly change.
 
 ## 5. Regression / golden files
 

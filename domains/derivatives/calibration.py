@@ -131,9 +131,11 @@ class SurfaceCalibrationService:
                 AnalyticalWarning.warn(
                     SurfaceWarningCode.CALENDAR_NOT_PREVENTED,
                     "The fitted surface violates calendar consistency. Per-expiry "
-                    "SVI fits each slice independently and cannot prevent this; it "
-                    "is detected and reported until an arbitrage-free global "
-                    "parameterization (SSVI) lands in Phase 9.",
+                    "SVI fits each slice independently and cannot prevent this, "
+                    "only detect it. The SSVI global surface fitted from the same "
+                    "analysis imposes a non-decreasing at-the-money variance term "
+                    "structure, which is the condition itself, and so cannot "
+                    "contain this violation.",
                 )
             )
 

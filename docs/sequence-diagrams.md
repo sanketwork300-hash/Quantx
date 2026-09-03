@@ -1,8 +1,8 @@
 # Sequence Diagrams
 
-ASCII sequence diagrams for the five flows that define the system. Diagram 1 is
-**implemented** in Phase 0; 2-5 are design commitments whose seams already exist
-in the Phase 0 code (provider interface, `MarketState`, job system, envelope).
+ASCII sequence diagrams for the six flows that define the system. Diagrams 1-5
+are **implemented**; diagram 6 is a design commitment whose seams already exist
+(provider interface, `MarketState`, job system, envelope).
 
 ---
 
@@ -169,7 +169,57 @@ The decomposition is explicitly labelled model-based: spread, impact and timing
 are not separately observable, and the residual definition is stated in the
 response rather than presented as measurement.
 
-## 5. Unified order analysis (Phase 11)
+## 5. Advanced derivatives (Phase 9)
+
+```
+Client   API   AdvancedSvc  ChainAnalysis  SSVICalib  Dupire  Density  HestonCalib  DB
+  |       |         |            |             |         |        |         |        |
+  |-POST /derivatives/analyses/{id}/global-surface--------------------------------->|
+  |       |--create job, 202----------------------------------------------------->  |
+  |       |         |--rehydrate the analysis FROM THE DATABASE---->|               |
+  |       |         |   (not carried over in memory: a surface refitted from stored |
+  |       |         |    rows in six months must be the same surface)               |
+  |       |         |--one SLSQP fit over EVERY expiry at once----->|               |
+  |       |         |   free: rho, eta, gamma, theta_1..theta_n                     |
+  |       |         |   constrained: theta non-decreasing  (= no calendar arbitrage)|
+  |       |         |                Theorem 4.2 bounds    (sufficient only)        |
+  |       |         |                Durrleman g >= 0      (the actual condition)   |
+  |       |         |--persist global_surfaces + slices--------------------------->|
+  |       |         |   CHECK refuses a CONVERGED row that is not arbitrage-free    |
+  |       |         |--Dupire grid on the fitted surface----->|                     |
+  |       |         |   analytic dw/dk, d2w/dk2, dw/dT; NO bumping                  |
+  |       |         |   denominator ~ 0 -> the point is a HOLE with its reason      |
+  |       |         |--persist local_volatility_surfaces------------------------->|
+  |       |         |   CHECK total_points = valid_points + flagged_points          |
+  |       |         |--Breeden-Litzenberger per expiry---------------->|            |
+  |       |         |   quantiles ONLY if non-negative AND normalised               |
+  |       |         |--persist risk_neutral_densities---------------------------->|
+  |       |         |--Heston: vega-weighted SLSQP on the same quotes-->|          |
+  |       |         |   Feller reported; enforced only on request                   |
+  |       |         |--persist heston_calibrations------------------------------->|
+  |<-surface, calibration, local vol, densities, Heston, warnings                    |
+  |                                                                                 |
+  |-POST /derivatives/consensus {instrument_id}------------------------------------>|
+  |       |   422 here, not a failed job, if the instrument is not a vanilla option  |
+  |       |         |--load the global surface from its stored parameters           |
+  |       |         |--reference IV at (K, T) -> the ONE volatility every model sees |
+  |       |         |--BSM | Dupire PDE | Heston | Monte Carlo (seeded)              |
+  |       |         |   a model whose inputs are missing returns a REASON, not a gap |
+  |       |         |--observed two-sided mid at or before the surface's own as-of   |
+  |       |         |   later quote would report the market moving as model error    |
+  |       |         |--median, range, dispersion, confidence contributions           |
+  |       |         |--persist model_consensus_runs + model_values--------------->|
+  |       |         |   CHECK value XOR unavailable_reason                          |
+  |       |         |   CHECK median lies inside [reference_low, reference_high]     |
+  |<-reference_value, reference_range, dispersion, per-model values, confidence      |
+```
+
+There is no step in which a model is chosen. The output is the set of values and
+the width of the interval containing them; picking one would be a judgement
+about which set of wrong assumptions is least wrong today, and the platform does
+not make it.
+
+## 6. Unified order analysis (Phase 11)
 
 ```
 Client  API   OrderAnalysisSvc  MarketStateBuilder  ValuationSvc  SurfaceSvc  ExecSvc  RiskSvc  MarginSvc

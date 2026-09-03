@@ -67,8 +67,26 @@ Reported per **position**, with units always stated:
 | Theta | **currency change per calendar day** | `q * M * dV/dT / 365` |
 | Rho | currency change per +1 basis point | `q * M * dV/dr * 0.0001` |
 
+Higher-order, added in Phase 9 and reported per contract rather than scaled by
+position, because they are read as sensitivities of the hedge rather than as
+currency amounts:
+
+| Greek | Unit | Formula |
+| --- | --- | --- |
+| Vanna | delta change per +1 volatility point | `-e^{-q tau} phi(d1) d2 / sigma * 0.01` |
+| Volga | vega change per +1 volatility point | `vega * d1 * d2 / sigma * 0.01^2` |
+| Charm | delta change per calendar day | `dDelta/dt / 365` |
+
+Vanna and volga are identical for a call and a put — both are second
+derivatives of a price pair differing by a term linear in spot and constant in
+volatility, so the difference vanishes. Charm is not, because put-call parity's
+spot term carries the dividend, and the two differ by exactly
+`q e^{-q tau}` per year. Both facts are asserted as tests rather than assumed.
+
 `q` = signed quantity, `M` = contract multiplier. A raw `dV/dsigma` is never
-displayed: an unlabelled vega is a bug report waiting to happen.
+displayed: an unlabelled vega is a bug report waiting to happen. The raw
+partials are kept alongside the scaled readings so nothing downstream has to
+back out a factor, and the payload carries its own `units` block.
 
 ### 2.4 Numerical precision
 
@@ -568,15 +586,128 @@ nowhere in its output. That is asserted by a test over the entire serialised
 response, at both the domain and the HTTP layer, because it is a contract rather
 than a style preference.
 
-## 9. Risk-neutral density — _(Phase 9)_
+## 8c. Portfolio valuation — Phase 4 (implemented)
+
+### Price selection
+
+A position is priced from the first source that exists, and the source is
+recorded rather than inferred:
+
+| Order | Source | `valuation_method` |
+| --- | --- | --- |
+| 1 | Observed two-sided mid, fresher than `STALE_QUOTE_SECONDS` (900s) | `MARKET_MID` |
+| 2 | Observed two-sided mid, older than that | `STALE_MARKET` |
+| 3 | Last traded price, when there is no two-sided market | `MARKET_LAST` |
+| 4 | Reference price from the fitted surface | `MODEL_REFERENCE` |
+| 5 | Nothing usable | `UNAVAILABLE` |
+
+`Quote.mid_price` returns `None` rather than falling back to the last trade, so
+step 3 is an explicit, flagged substitution (`POSITION_LAST_PRICE_FALLBACK`) and
+never a silent one: a print is not a market.
+
+### Position value and Greeks
+
+```
+scale         = signed_quantity * contract_multiplier
+market_value  = price_used * scale
+base_value    = market_value * fx_rate
+unrealised    = (market_value - average_price * scale) * fx_rate
+greek         = unit_greek * scale * fx_rate
+```
+
+The scaling by quantity, multiplier and FX rate happens in exactly one place, so
+a Greek can be neither double-scaled nor unscaled. Units are carried in the
+field names (`vega_per_vol_point`, `theta_per_day`, `rho_per_bp`) and restated in
+`GREEK_UNITS` on every response.
+
+Unit Greeks come from Black-Scholes-Merton (§2.3) at
+
+- the volatility implied by the contract's own observed price where there is
+  one — `greek_source: MARKET_IV`, preferred because that volatility reprices
+  the observation exactly, which the surface does not; otherwise
+- the surface's reference volatility — `REFERENCE_IV`.
+
+Linear instruments (equity, index, future, perpetual, spot, FX) have a delta of
+one per unit and no second-order sensitivity to report. Nothing about them is a
+model estimate.
+
+### Time to expiry
+
+`tau = year_fraction(as_of, combine(expiry, settlement_time_utc), day_count)`.
+Without a settlement time, `tau` is undefined, and option Greeks are omitted
+with `POSITION_NO_GREEKS` rather than computed against a guessed moment. The
+observed price is still an observation; only the model half is absent.
+
+### Currency
+
+Conversion uses the FX rate in the same `MarketState` as the prices, and the
+rate is recorded on the position. A position in a currency with no rate in the
+snapshot is left unvalued with `POSITION_NO_FX_RATE` rather than converted at a
+rate from a different moment.
+
+### Aggregation
+
+Buckets over underlying, expiry, asset class, strategy tag and currency each sum
+the *same* per-position numbers, so every dimension totals to the portfolio
+total. A position that does not carry a dimension is absent from that grouping
+rather than assigned a fabricated key, and each bucket reports how many of its
+members were actually priced.
+
+## 8d. SSVI global surface — Phase 9 (implemented)
+
+```
+w(k, theta) = (theta / 2) * { 1 + rho phi(theta) k
+                              + sqrt[ (phi(theta) k + rho)^2 + (1 - rho^2) ] }
+phi(theta)  = eta / ( theta^gamma (1 + theta)^(1 - gamma) )
+```
+
+`theta(T)` is at-the-money total variance and `w(0, theta) = theta` exactly.
+The `(1 + theta)` factor in the power law keeps `theta * phi` bounded as
+maturity grows, which is what keeps the butterfly condition satisfiable at the
+long end rather than only near the front.
+
+Admissibility, all three imposed inside the optimizer rather than checked after
+it (Gatheral & Jacquier 2014, §4):
+
+| Condition | Form | Status |
+| --- | --- | --- |
+| Calendar | `theta` non-decreasing in `T` | necessary and sufficient for SSVI |
+| Butterfly | `theta phi (1 + |rho|) < 4` and `theta phi^2 (1 + |rho|) <= 4` | sufficient only |
+| Butterfly | Durrleman `g(k) >= 0` on a grid | the actual condition |
+
+The closed-form bounds and Durrleman's function are both evaluated and both
+stored. A surface can fail the bounds and still have a non-negative density
+everywhere, and treating a sufficient condition as if it were necessary would
+mean rejecting admissible surfaces on the strength of a theorem rather than of
+the surface in front of us.
+
+Interpolation of `theta` between fitted expiries is monotone piecewise-cubic, so
+the calendar condition holds everywhere and not merely at the knots. Below the
+first expiry `theta` is linear to `theta(0) = 0`, which is a boundary condition
+rather than an extrapolation — a zero-length period has zero variance. Above the
+last expiry it is flat, which is a refusal to extrapolate. Both are flagged.
+
+## 9. Risk-neutral density — Phase 9 (implemented)
 
 Breeden-Litzenberger: `f(K) = e^{rT} d2C/dK2`, evaluated on the smooth fitted
-surface, never on raw quotes. Negative regions are flagged as evidence of
-residual arbitrage or over-fitting. Presented as a diagnostic and an
-interpretability aid — it is a risk-neutral density and is never described as a
-forecast of what the market will do.
+surface by a relative-bump second difference, never on raw quotes. Negative
+regions are flagged as evidence of residual arbitrage or over-fitting.
 
-## 10. Local volatility — _(Phase 9)_
+Four diagnostics travel with every density: the trapezoidal mass, the implied
+mean against the forward (the martingale property, and a measure of how much of
+the tail the strike range truncated), the negative mass, and whether the strike
+range is wide enough to contain the distribution.
+
+A density is **admissible** when it is non-negative *and* normalised, and
+quantiles are computed only for an admissible one. A quantile normalises by the
+mass it found, so on a truncated window it would be a quantile of the window
+rather than of the density, and would look entirely reasonable while being
+wrong.
+
+Presented as a diagnostic and an interpretability aid — it is a risk-neutral
+density and is never described as a forecast of what the market will do.
+
+## 10. Local volatility — Phase 9 (implemented)
 
 Dupire in total-variance form (Gatheral), which is numerically far better behaved
 than the raw price-derivative form:
@@ -585,119 +716,403 @@ than the raw price-derivative form:
 sigma_loc^2(k, T) = (dw/dT) / [ 1 - (k/w)(dw/dk) + 0.25(-0.25 - 1/w + k^2/w^2)(dw/dk)^2 + 0.5 d2w/dk2 ]
 ```
 
+Derivatives are analytic, not bumped: a finite-difference error in `d2w/dk2`
+becomes a local volatility wrong by an amount nothing downstream can detect.
+
 Rules: derivatives are taken on the fitted arbitrage-aware surface only;
 denominators near zero produce `INVALID`, not a clipped value; extrapolated
-regions are flagged; each `LocalVolPoint` carries `confidence` and `flags`.
+regions are flagged; each `LocalVolPoint` carries `confidence` and `flags`; and
+the stored grid conserves its points, `total = valid + flagged`.
 
-## 11. Local-vol PDE — _(Phase 9)_
+Evaluating the surface at calendar time `t` uses the forward **to t**, not the
+forward to the option's maturity: the surface is parameterised in
+`k = log(K / F_T)`, and holding one forward fixed across the time grid shifts
+every lookup along the smile by the carry. The forward curve is
+`spot * exp(carry * t)` with `carry` fitted by least squares through the origin
+on the observed forwards, stated as the deterministic-carry approximation it is.
+
+The validation is a round trip: a local-volatility surface derived from an
+implied surface must reprice that implied surface. It does, to under 0.2%.
+
+## 11. Local-vol PDE and Monte Carlo — Phase 9 (implemented)
 
 Crank-Nicolson on `x = ln S` with Rannacher start-up (two fully-implicit
 half-steps) to damp the oscillations Crank-Nicolson produces against a
 non-smooth payoff. Non-uniform grid concentrated near the strike; Dirichlet
 boundaries from asymptotic payoff behaviour.
 
+The solution is read at the spot by a quartic fit through five nodes. A
+quadratic through three nodes gives a second derivative accurate only to `O(h)`,
+and the convergence test reported gamma at first order until it was widened —
+which is the point of testing the order rather than the error.
+
 Mandatory validation: with `sigma_loc(S, t) = sigma` constant, the PDE price must
 converge to the Black-Scholes price, and the test asserts the empirical order of
-convergence, not merely that the final error is small.
+convergence, not merely that the final error is small. Measured: 2.00 for price,
+2.00-2.03 for delta and gamma, on a uniform and on a concentrated grid.
 
-## 12. VaR and Expected Shortfall — _(Phase 5)_
+**Monte Carlo.** Exact geometric Brownian motion terminals, antithetic pairs,
+and a control variate on the discounted terminal price, whose expectation
+`S e^{-q tau}` is known exactly under the pricing measure. Measured variance
+reduction about 78%. A simulated price is meaningless without its standard
+error, so the two are never separated, and the seed and path count are stored
+with the result: the same pair reproduces the number exactly and a different
+seed does not.
 
-**Historical simulation.** Aligned factor-return series over a stated lookback;
-for nonlinear books, **full repricing** under each historical scenario, not a
-Greek extrapolation. The response reports lookback, horizon, confidence,
-observation count and the alignment/missing-data policy applied.
+**Heston.** Characteristic function in the Albrecher et al. (2007) little-trap
+form, which keeps the complex logarithm on its principal branch at long
+maturities where the naive form silently crosses the cut. Puts come from
+put-call parity rather than a second quadrature, so a call and a put from the
+same parameters cannot drift apart. The integration limit scales with
+`1 / sqrt(v tau)`: the integrand decays like `exp(-u^2 v tau / 2)`, so a fixed
+truncation is an unstated assumption that the tail has died, and for a one-week
+option it has not. Cross-checked against QuantLib's `AnalyticHestonEngine` to
+1.5e-11 absolute across maturities from one week to ten years.
 
-**Parametric.** Covariance-based, valid only for approximately linear exposures.
-The response states the assumptions inline and it is never returned as the sole
-measure for an option book.
+## 12. VaR and Expected Shortfall — Phase 5 (implemented)
 
-**Monte Carlo.** Explicit factor model, seeded and reproducible, full repricing,
-convergence reported with the standard error. Fat tails, GARCH filtering and
-copulas are later options, each requiring its own validation before it ships.
+Everything works on a **loss** convention: a loss is a positive number, so
+`loss = -pnl`. The sign is applied in exactly one place
+(`quant/statistics/var.py::losses_from_pnl`), because mixing the two is the
+classic sign error in risk code.
 
-**Expected shortfall.** `ES_alpha = E[L | L > VaR_alpha]`, always reported
-alongside VaR, with the distinction spelled out in the response: VaR is a
-threshold loss, ES is the average loss given that the threshold is exceeded.
+### Historical simulation
 
-## 13. Stress testing — _(Phase 5)_
+Aligned factor returns over the recorded lookback, with **full repricing** under
+each historical scenario. VaR is the sample quantile by linear interpolation
+between order statistics (Hyndman & Fan type 7, NumPy's default), which converges
+to the analytic quantile as the sample grows — validated against the normal and
+uniform closed forms in `tests/quant_validation/test_var.py`.
 
-Shocks are applied to a `MarketState`, producing a new immutable shocked state;
-the portfolio is then **fully revalued**. Shock types: `ABSOLUTE`, `PERCENTAGE`,
-`VOL_POINTS`, `BASIS_POINTS`. Volatility shocks act on the surface, so a shocked
-option is repriced under a shocked surface rather than bumped by vega.
+Expected shortfall is the mean of the observations at or beyond that quantile,
+and is reported with the number of observations in that tail. At 99% a 250-day
+sample puts 2.5 observations in the tail, so a `tail_observations` of 2 is not a
+statistic and the response says so rather than presenting it as one.
 
-Greek-based approximation is available for interactive previews and is **labelled
-as an approximation** in the response. For large shocks the two genuinely differ,
-and a test asserts that they do — if they did not, the full revaluation would not
-be earning its cost.
+### Parametric
 
-## 14. Margin — _(Phase 6)_
+`VaR = mu + z_alpha * sigma` on the loss distribution, with
 
-`SimpleRiskMarginModel`: margin is the worst loss over a declared shock grid
-(underlying % moves x volatility point moves), plus a short-option minimum, plus
-a concentration add-on. Every one of those components is a stated assumption, not
-an exchange rule.
+    ES = mu + sigma * phi(z_alpha) / (1 - alpha)
 
-Utilisation `= margin_required / eligible_capital` when capital is known.
+for the normal. The portfolio is linearised by delta and vega: the exposure to a
+1.0 return of factor *i* is `sum(delta * spot)` over that underlying, and the
+exposure to 1.0 of volatility is `sum(vega_per_vol_point / 0.01)`. Then
+`sigma_pnl = sqrt(w' Sigma w)`.
 
-Liquidation vulnerability is a **shock-grid scan**: for each underlying shock,
-compute equity, margin requirement and buffer; report the region where
-`buffer <= 0` as an *estimated margin-shortfall region* with its assumptions and
-confidence. No single guaranteed liquidation price is ever produced, because
-producing one would require broker rules we do not have.
+The response states inline that this ignores convexity, and carries
+`RISK_PARAMETRIC_ON_NONLINEAR_BOOK` whenever the book contains an option. It is
+never returned as the sole measure for an option book.
 
-## 15. Transaction cost analysis — _(Phase 7)_
+`normal_quantile` is Acklam's rational approximation refined by one Halley step.
+Above the median the Halley residual is computed from the *complement*
+(`(1 - p) - upper_tail`) rather than `F(x) - p`, because the latter loses every
+digit when both terms are within 1e-9 of one. That single change is the
+difference between nine correct digits and sixteen at a 1e-9 tail; it agrees
+with `scipy.stats.norm.ppf` to 2.2e-16 relative across 1e-12 to 1 - 1e-12.
 
-Implementation shortfall for a buy: `IS = (P_exec - P_arrival) * Q`; sign
-reversed for a sell, so a positive IS is always a cost. Reported in currency,
-basis points and percent.
+### Monte Carlo
 
-Benchmarks each declare window, market-data source and method. Arrival price is
-the prevailing mid at the submit timestamp; when no submit timestamp exists, the
-first-fill price is used as a proxy and flagged `ARRIVAL_PROXY_USED`, because
-silently substituting one benchmark for another is how TCA becomes fiction.
+An explicit multivariate factor model — a stated mean vector and covariance,
+normal or Student-t — simulated from a seed and **fully repriced**. The same
+seed and factor panel reproduce the numbers exactly, and a test asserts it.
 
-Cost decomposition is **model-based** and labelled as such:
+- **Drift is set to zero, not estimated.** A mean return from a few dozen
+  observations is indistinguishable from noise, and letting it into a one-day
+  risk number would put a trend nobody measured into the answer.
+- **Antithetic variates** are on by default: for every draw `z` the draw `-z` is
+  also used, which removes the odd part of the sampling error exactly. The
+  sample mean of the draws is then zero to machine precision.
+- The factorisation is by eigen-decomposition rather than Cholesky, so a
+  singular covariance (one factor a copy of another) still simulates.
+- **Student-t is scaled so the marginal variance matches the covariance
+  supplied**, rather than being inflated by `nu / (nu - 2)` without saying so.
+  Nothing calibrates `nu`; it is a parameter the user sets.
+
+### Uncertainty in the estimate itself
+
+Reported as a **bootstrap interval**, not an asymptotic standard error. The
+asymptotic formula needs the density at the quantile, and estimating a density
+from the same thin tail whose uncertainty is in question is circular. Resampling
+makes no such assumption.
+
+### Horizon scaling
+
+`scale_to_horizon` implements square-root-of-time and is offered because it is
+the market convention, but the VaR path does not use it: multi-day horizons come
+from overlapping windows in the actual series. Square-root scaling is valid only
+for independent, identically distributed increments with no drift, and an option
+book's risk does not scale that way because its Greeks change as the underlying
+moves.
+
+### Covariance
+
+The sample covariance, with its weakness stated rather than papered over: it is
+noisy once the number of factors approaches the number of observations, and
+singular beyond. The platform flags `COVARIANCE_FEW_OBSERVATIONS` below ten
+observations per factor and `COVARIANCE_RANK_DEFICIENT` at or beyond parity,
+rather than silently shrinking — a shrinkage intensity chosen to make a matrix
+invertible is a modelling decision the user should get to see. Only float-noise
+negative eigenvalues are repaired, and the repair reports that it happened.
+
+## 13. Stress testing — Phase 5 (implemented)
+
+Shocks are applied to each position's own pricing anchors and the position is
+**fully revalued**. Shock types: `ABSOLUTE`, `PERCENTAGE`, `VOL_POINTS`,
+`BASIS_POINTS`.
+
+    new_spot = spot * (1 + pct) + abs
+    new_vol  = max(vol * (1 + rel) + points, 1e-4)
+    new_rate = rate + bp / 10000
+    new_tau  = max(tau - decay_days / 365, 0)
+    pnl      = (V(new) - V(base)) * quantity * multiplier * fx
+
+The base price is the model price at the unshocked anchors, and the anchor
+volatility is the one implied by the position's own observed price. A null
+scenario therefore reprices to the base value **exactly** — the property that
+makes every stress P&L a statement about the shock rather than about the model.
+
+Greek-based approximation is available and is **labelled as an approximation**
+in the response:
+
+    dV ~ delta*dS + 0.5*gamma*dS^2 + vega_per_vol_point*(dsigma/0.01)
+         + rho_per_bp*(dr*10000) + theta_per_day*dt
+
+The units are the ones the Greeks were named for, so the shocks are converted
+into those units rather than the Greeks into the shocks'. For large shocks the
+two genuinely differ, and a test asserts that they do — if they did not, the
+full revaluation would not be earning its cost.
+
+## 14. Margin — Phase 6 (implemented)
+
+**The platform does not know your broker's margin.** Exchange and broker
+methodologies are proprietary, versioned, and change without notice. Everything
+below is a model defined in this repository, and every result says so.
+
+### `SimpleRiskMarginModel`
+
+    scan_loss     = max(0, -min P&L over the declared grid)
+    floor         = short_option_minimum_rate x sum(short-option notional)
+    concentration = add_on_rate x max(0, largest_gross - threshold x total_gross)
+    margin        = max(scan_loss, floor) + concentration
+
+Short-option notional is strike x multiplier x |quantity| — what the contract
+controls on exercise, not the premium it cost.
+
+The floor is a floor rather than an addition: a book whose scan loss is small
+only because every short option is far out of the money is not a book with no
+risk. The concentration charge is an addition, because it is a different
+statement about a different weakness of the grid.
+
+Every grid point is a genuine repricing of every position. The grid is a
+parameter and travels on every result, because a margin number *is* the worst
+loss over the moves someone chose to look at.
+
+### The two rates default to zero
+
+Not to a plausible-looking 2%. A rate at which a venue floors a short option is
+that venue's rule, and inventing one here would produce a confident number about
+the quantity that can force a user out of a position. The response instead
+carries `MARGIN_NO_SHORT_OPTION_MINIMUM` and says in words that the estimate
+understates a book of far out-of-the-money shorts.
+
+### Confidence
+
+The weighted geometric mean of coverage (repriceable positions over all),
+grid containment (0.5 when the worst point sat on a boundary that could be
+widened past, 1.0 otherwise) and mark consistency (how closely the model at
+today's anchors reproduces the marked value). A geometric mean so that one bad
+dimension pulls the whole score down rather than being averaged away.
+
+An unbounded-loss book can never contain its worst case in a finite grid, so its
+containment score stays at 0.5 permanently. That is the honest reading: such an
+estimate genuinely is a lower bound.
+
+### Utilisation and buffer
+
+`utilisation = estimated_margin / eligible_capital` and
+`buffer = eligible_capital - estimated_margin`, both only when capital is
+supplied. When it is not, both are null with a warning; they are never defaulted
+to portfolio value, which is a different quantity. A database CHECK refuses a
+stored row carrying a buffer without the capital it was measured against.
+
+### Margin vulnerability
+
+A ladder scan in **both** directions. At each rung the book is fully repriced
+and the margin model is rerun on the moved market, because both the value and
+the requirement change as the market moves. Available capital is the stated
+capital plus the mark-to-model change, which assumes no cash movement and no
+position being closed — all stated.
+
+The reported crossing is interpolated linearly in the underlying's return
+between the two rungs that bracket it, and **those two rungs are reported with
+it**, so the coarseness of the estimate is visible rather than hidden behind a
+decimal place.
+
+No single guaranteed liquidation price is ever produced, because producing one
+would require broker rules this platform does not have and cannot obtain.
+
+## 15. Transaction cost analysis — Phase 7 (implemented)
+
+Implementation shortfall for a buy: `IS = (P_exec - P_benchmark) * Q * M`; sign
+reversed for a sell, so a **positive IS is always a cost**. The side's sign is
+applied in exactly one place (`Side.sign`), because paying above the benchmark on
+a buy and receiving below it on a sell are the same thing and reporting one as a
+gain is a sign error with a very confident face.
+
+Reported in three units:
+
+    currency     = (P_exec - P_benchmark) * side_sign * Q * multiplier
+    basis points = (P_exec - P_benchmark) * side_sign / P_benchmark * 10000
+    percent      = the same fraction, times 100
+
+The multiplier scales the currency amount and nothing else — a shortfall in
+basis points is a property of the prices, not of the contract size.
+
+### Benchmarks
+
+Each declares window, market-data source and method. Arrival is the prevailing
+mid at the submit timestamp; when no submit timestamp exists the first-fill price
+is used as a proxy and flagged `ARRIVAL_PROXY_USED`, because silently
+substituting one benchmark for another is how TCA becomes fiction — and because
+the substitution is *biased*: measuring from the first fill hides everything that
+moved before it, so the proxied shortfall is systematically smaller.
+
+The order's window runs from **submission** to the last fill, not from the first
+fill, since the delay before trading started is part of what it cost.
+
+The interval TWAP is piecewise-constant in time: each observation holds until the
+next arrives, which is what the platform actually knows. Interpolating between
+observations would invent prices the market never showed.
+
+The prevailing mid is weighted by **fill quantity** rather than by time, because
+it answers "what was on screen while I was trading?" and a fill of 500 at a wide
+moment costs more than a fill of 5.
+
+### Coverage before computation
+
+An interval statistic is computed only when the observations both number enough
+(4) and span enough of the window (60%). Below either, the benchmark reports
+itself unavailable with a reason and **no shortfall is computed against it**. A
+missing benchmark is not a cost of zero, and the two never render the same way.
+
+The interval VWAP additionally requires *interval* volume. A cumulative session
+volume carried on a snapshot is not that, and treating it as though it were would
+weight the whole day onto one instant, so the benchmark reports itself
+unavailable rather than degrading into a time-weighted average under a
+volume-weighted name.
+
+### Cost decomposition
+
+**Model-based, and labelled as such component by component:**
 
 ```
-spread cost = 0.5 * quoted spread at fill
-impact      = MarketImpactModel estimate
-fees        = observed
-timing      = IS - spread - impact - fees        (residual, by definition)
-opportunity = unfilled quantity * (benchmark - decision price)
+spread cost = 0.5 * quoted spread at fill, weighted by fill quantity  MODELLED
+fees        = as recorded on the fills                                MEASURED
+impact      = not modelled in this phase                              NOT_MODELLED
+timing      = IS - spread - fees                                      RESIDUAL
+opportunity = unfilled quantity * (reference - benchmark)             MODELLED
 ```
 
-Spread, impact and timing are not separately observable. The residual definition
-of timing is stated in the response so no one mistakes the decomposition for a
-measurement.
+Only fees are an observation. Impact carries no number at all: it is Phase 8's
+work, it is not zero, and it sits inside the residual — which the residual's own
+`basis` says. Presenting the split as measurement would be false precision, so
+the decomposition carries a `caveat` field stating that spread, impact and timing
+are not separately observable.
 
-## 16. Market impact — _(Phase 8)_
+Opportunity cost needs the order's intended quantity, which only the trade log
+can supply. It is never inferred from the fills: assuming an order filled
+completely because the log shows only fills is how an unfilled order silently
+reports no opportunity cost.
 
-Square-root baseline: `impact = eta * sigma * sqrt(Q / ADV)`, with `eta`, the
-volatility estimator and the ADV window all declared parameters recorded in the
-model registry. Linear baseline for comparison. ML models only after enough
-labelled executions exist, evaluated out-of-time, and only shipped if they beat
-the square-root baseline on held-out data bucketed by order size.
+## 16. Market impact and execution simulation — Phase 8 (implemented)
 
-## 17. Model consensus — _(Phase 9)_
+### Impact
+
+```
+square root:  permanent = eta   * sigma * sqrt(Q / ADV)
+              temporary = gamma * sigma * sqrt(participation)
+linear:       permanent = eta   * sigma * (Q / ADV)
+              temporary = gamma * sigma * participation
+```
+
+The square-root dependence on relative size is the most robust empirical
+regularity in the impact literature (Almgren et al. 2005; Gatheral 2010). The
+linear model is kept as a comparison baseline precisely because it overstates
+large orders — a conclusion that survives both is one that does not depend on
+the choice.
+
+**No coefficient ships calibrated.** `eta` and `gamma` default to `1.0`, which
+is the identity rather than an estimate: at that setting the output is the shape
+of the model in units of `sigma * sqrt(Q/ADV)`, and every result carries
+`IMPACT_COEFFICIENT_NOT_CALIBRATED`. Coefficients are regime-, venue- and
+period-dependent; adopting a published estimate as a default would assert a
+measurement of a market nobody here observed. ML models remain gated on having
+enough labelled executions, evaluated out-of-time and bucketed by order size.
+
+Permanent and temporary impact are returned separately because a simulator needs
+them so: permanent moves the reference for every later slice, temporary is paid
+on the slice and does not persist. The temporary term is driven by the
+**participation rate**, which is what a schedule actually controls.
+
+### Schedule allocation
+
+Slices must sum to the parent quantity exactly. Cumulative floors give each
+slice its whole-lot share and the leftover lots go one at a time to the largest
+fractional parts, which keeps the slices near their weights *and* makes the sum
+exact. Any sub-lot dust joins the largest slice rather than disappearing.
+
+### Simulation
+
+    fill = observed_mid + accumulated_permanent
+           + side_sign * (temporary_impact + half_spread)
+
+Every result is a **counterfactual estimate**: the observed path contains what
+the real market did, not what this hypothetical order would have done to it. A
+slice whose nearest observation is older than the declared tolerance is left
+unfilled rather than filled at a stale price — the reverse of the portfolio
+convention, because a stale mark still describes a position that exists whereas
+a stale hypothetical fill asserts liquidity nobody saw.
+
+Simulated fills are scored by the Phase 7 benchmark and shortfall machinery
+unchanged, so a counterfactual and a real execution are never measured
+differently.
+
+## 17. Model consensus — Phase 9 (implemented)
 
 Multiple pricers produce a set of values. The platform reports
 `reference_value` (median), `reference_range`, `model_dispersion` and
-`market_deviation` — never a single "true" price. Confidence aggregates model
+`market_deviation` — never a single "true" price, and with no field anywhere in
+the payload or the stored row that could hold one. Confidence aggregates model
 disagreement, calibration error, bid/ask width, liquidity, extrapolation
 distance, data quality, arbitrage violations, quote age and observation count,
 and every confidence output can enumerate the specific contributions that made it
 what it is (build spec §80).
 
+The aggregation is a weighted geometric mean, so one bad dimension pulls the
+score down rather than being averaged away — the same aggregation the quality
+engine and the margin model use, so "confidence" means the same thing across the
+platform. Model agreement uses the quadratic ratio penalty
+`1 / (1 + (d / d_ref)^2)` with `d_ref = 5%`: there is no dispersion at which
+agreement becomes exactly worthless, and a linear ramp to zero would score a
+5.1% spread and a 50% spread identically.
+
+A model that cannot run contributes a named unavailability, not a missing entry,
+and the reduced model count enters the confidence directly. Nothing is defaulted
+to make a model runnable.
+
 ## 18. Known limitations
 
-1. European exercise only until an American engine lands; American options on
-   dividend-paying underlyings are mispriced by the European formulas and are
-   rejected rather than approximated.
+1. European exercise only; American options on dividend-paying underlyings are
+   mispriced by the European formulas and are rejected rather than approximated.
+   No binomial engine ships, because every instrument the platform ingests today
+   is European and an early-exercise pricer with nothing to price would be
+   untested surface.
 2. Dividends/borrow enter as a continuous yield `q`. Discrete dividends are a
    later feature.
-3. Per-expiry SVI can exhibit calendar arbitrage; detected, reported, not
-   prevented until SSVI.
+3. Per-expiry SVI can exhibit calendar arbitrage; it is detected and reported.
+   The SSVI global surface cannot, by construction, and both are offered — SVI
+   still describes any single smile better than three shared parameters can.
 4. Margin models are approximations and are not broker-equivalent.
 5. All execution simulations are counterfactual: executing the simulated schedule
    would have changed the market it was simulated against.
@@ -705,3 +1120,11 @@ what it is (build spec §80).
    are reported with low confidence rather than suppressed or overstated.
 7. Synthetic data is internally consistent by construction and must never be used
    to validate a claim about real markets — only to validate that code is correct.
+8. Heston's characteristic function carries `1 / xi^2` and is ill-conditioned as
+   the vol-of-vol vanishes: against Black-Scholes at the same variance the price
+   converges as `xi^2` down to about `xi = 1e-4` and then worsens. The
+   deterministic-variance limit is Black-Scholes and should be priced with it.
+9. Local volatility is undefined past the last fitted expiry, where the variance
+   term structure is deliberately flat and `dw/dT` is therefore zero. The PDE
+   substitutes the surface's implied volatility there and counts the
+   substitutions rather than extrapolating a term structure nobody quoted.

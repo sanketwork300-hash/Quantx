@@ -236,13 +236,20 @@ guessed:
 | GET | `/derivatives/surfaces/{surface_row_id}` | **[P2]** |
 | POST | `/derivatives/surfaces/{surface_row_id}/reference` | **[P2]** reference IV and price |
 | GET | `/derivatives/arbitrage/{analysis_id}` | **[P2]** both scopes |
-| POST | `/derivatives/pricing` | _(planned P9)_ |
-| POST | `/derivatives/pricing/compare` | _(planned P9 — model consensus)_ |
 | POST | `/derivatives/surfaces/{surface_row_id}/anomalies` | **[P3]** job |
 | GET | `/derivatives/anomalies/{underlying_id}` | **[P3]** latest scan |
 | GET | `/derivatives/scans/{scan_id}` | **[P3]** |
 | GET | `/derivatives/history/{underlying_id}` | **[P3]** percentiles by tenor |
-| GET | `/derivatives/density/{surface_id}` | _(planned P9)_ |
+| POST | `/derivatives/analyses/{analysis_id}/global-surface` | **[P9]** job: SSVI, local vol, densities, Heston |
+| GET | `/derivatives/global-surfaces` | **[P9]** |
+| GET | `/derivatives/global-surfaces/latest?underlying_id=` | **[P9]** |
+| GET | `/derivatives/global-surfaces/{id}` | **[P9]** |
+| GET | `/derivatives/global-surfaces/{id}/local-volatility` | **[P9]** the Dupire grid, holes and all |
+| GET | `/derivatives/global-surfaces/{id}/densities` | **[P9]** one per fitted expiry |
+| GET | `/derivatives/underlyings/{underlying_id}/heston` | **[P9]** latest calibration |
+| POST | `/derivatives/consensus` | **[P9]** job |
+| GET | `/derivatives/consensus` | **[P9]** previous runs |
+| GET | `/derivatives/consensus/{id}` | **[P9]** |
 
 ### 9.1 Invert one price
 
@@ -415,25 +422,518 @@ a smooth fit cannot hide a broken market and a broken fit is not reported as a
 market anomaly. Each violation carries its `magnitude` and the `tolerance` it
 was judged against, in that condition's own units.
 
-## 10. Portfolio _(planned — P4)_
+### 9.9 Global surface (SSVI) **[P9]**
 
-`POST /portfolios`, `GET /portfolios`, `GET /portfolios/{id}`,
-`PATCH /portfolios/{id}`, `DELETE /portfolios/{id}`,
-`POST /portfolios/{id}/positions`, `PATCH /portfolios/{id}/positions/{pid}`,
-`POST /portfolios/{id}/upload`, `GET /portfolios/{id}/valuation`,
-`GET /portfolios/{id}/greeks`.
+```http
+POST /api/v1/derivatives/analyses/{analysis_id}/global-surface
+{"seed": 20260924, "use_weights": true, "enforce_butterfly_bounds": true,
+ "calibrate_heston": true, "require_feller": false,
+ "build_local_volatility": true, "build_densities": true}
 
-## 11. Risk _(planned — P5/P6)_
+202 {"job_id": "...", "status": "QUEUED"}
+```
 
-`GET /risk/{portfolio_id}/summary`, `POST /risk/var` (job),
-`POST /risk/stress` (job), `GET|POST /risk/scenarios`,
-`GET /risk/{portfolio_id}/margin`,
-`GET /risk/{portfolio_id}/liquidation-vulnerability`.
+One job produces the SSVI fit, the Dupire local-volatility grid, the implied
+density per expiry and a constrained Heston fit. They read the same analysis;
+running them separately would let four artefacts disagree about which quotes
+they were built from.
 
-## 12. Execution _(planned — P7/P8)_
+```http
+GET /api/v1/derivatives/global-surfaces                     -> summaries
+GET /api/v1/derivatives/global-surfaces/latest?underlying_id=...
+GET /api/v1/derivatives/global-surfaces/{id}                -> envelope
+GET /api/v1/derivatives/global-surfaces/{id}/local-volatility
+GET /api/v1/derivatives/global-surfaces/{id}/densities
+GET /api/v1/derivatives/underlyings/{underlying_id}/heston
+```
 
-`POST /executions/upload`, `GET /executions`, `GET /executions/{id}/tca`,
-`POST /execution/simulate` (job), `POST /execution/compare-strategies` (job).
+A stored surface is rebuilt from three parameters and one `theta` per expiry,
+with no re-fitting on read.
+
+`calendar_arbitrage_free` on the summary is a **structural** property of an
+admissible SSVI fit, not a diagnostic that happened to pass. Both butterfly
+conditions are reported: `butterfly_bounds_satisfied` is the closed-form
+sufficient condition of Gatheral-Jacquier Theorem 4.2, and `min_durrleman_g` is
+the actual one. A surface can fail the first and satisfy the second, and the
+warning that says so states which is which.
+
+The local-volatility response carries `values` as a matrix with `null` wherever
+Dupire's denominator vanished, alongside `flag_counts` naming why, and
+`total_points = valid_points + flagged_points` holds by database constraint. A
+density's `percentiles` are `null` unless it is admissible.
+
+### 9.10 Model consensus **[P9]**
+
+```http
+POST /api/v1/derivatives/consensus
+{"instrument_id": "...", "risk_free_rate": 0.065, "dividend_yield": 0.0,
+ "paths": 100000, "seed": 20260924, "grid_nodes": 401, "grid_steps": 200}
+
+202 {"job_id": "...", "status": "QUEUED"}
+```
+
+`models` may name a subset; an unknown name is a 422 that lists what is
+available, and a non-option instrument is a 422 before a job exists. The
+contract must have a calibrated global surface for its underlying — the models
+read their volatility from it rather than from an assumption.
+
+```http
+GET /api/v1/derivatives/consensus            -> previous runs
+GET /api/v1/derivatives/consensus/{id}
+```
+
+The result carries `reference_value` (the median), `reference_range`,
+`model_dispersion`, `market_deviation`, the per-model `values` and a
+`confidence` whose `contributions` each carry the `basis` that produced them.
+
+**There is no `best_model`, `fair_value`, `true_price` or `recommendation`
+field, and no field that could hold one.** A test scans every key of the
+serialised payload. Each entry in `values` carries either a `value` or an
+`unavailable_reason` and never both or neither, which the database enforces.
+The `interpretation` field states in the response itself that the median is not
+a price the contract is worth and that the spread is a statement about model
+risk rather than about the market.
+
+## 10. Portfolio **[P4]**
+
+Every route resolves the portfolio through an ownership-scoped read. A
+`portfolio_id` is never trusted because it is a well-formed UUID; a foreign id
+returns 404, which is also the correct answer to "does this exist?".
+
+```
+POST   /api/v1/portfolios
+GET    /api/v1/portfolios
+GET    /api/v1/portfolios/{portfolio_id}
+PATCH  /api/v1/portfolios/{portfolio_id}
+DELETE /api/v1/portfolios/{portfolio_id}
+```
+
+### 10.1 Positions
+
+```
+GET    /api/v1/portfolios/{portfolio_id}/positions
+POST   /api/v1/portfolios/{portfolio_id}/positions
+PATCH  /api/v1/portfolios/{portfolio_id}/positions/{position_id}
+DELETE /api/v1/portfolios/{portfolio_id}/positions/{position_id}
+```
+
+Quantity is signed and negative is short. `side` is optional and is *checked
+against* the sign rather than used to infer it: a body saying `SHORT` with a
+positive quantity is `422 INVALID_POSITION`, because a silently reconciled sign
+is a portfolio whose every risk number is wrong with no error anywhere. A zero
+quantity is likewise refused.
+
+### 10.2 Import
+
+```
+POST /api/v1/portfolios/{portfolio_id}/import/preview
+POST /api/v1/portfolios/{portfolio_id}/import        -> 202 job
+```
+
+The file is uploaded through `POST /uploads` with `kind=POSITIONS`; an upload of
+another kind is refused with `422 WRONG_UPLOAD_KIND`, and a positions file sent
+to `POST /uploads/{id}/ingest` is refused with `400 WRONG_INGESTION_ROUTE`.
+
+The preview writes nothing and returns three buckets:
+
+```json
+{
+  "upload_id": "…", "headers": ["SYMBOL", "NETQTY", "…"],
+  "inferred_mapping": {"symbol": "SYMBOL", "quantity": "NETQTY"},
+  "applied_mapping":  {"symbol": "SYMBOL", "quantity": "NETQTY"},
+  "rows_in": 10, "committable": true,
+  "resolved":  [{"row_number": 1, "canonical_key": "…", "expiry": "2026-10-29",
+                 "strike": "23000", "option_type": "CALL", "quantity": "2",
+                 "side": "LONG", "resolution_method": "STRUCTURED_MATCH",
+                 "creates_instrument": false, "multiplier_is_assumed": false}],
+  "ambiguous": [{"row_number": 4, "reason": "MULTIPLE_CANDIDATES",
+                 "candidates": [{"canonical_key": "…"}, {"canonical_key": "…"}]}],
+  "invalid":   [{"row_number": 8, "reason": "SIDE_DISAGREES_WITH_QUANTITY",
+                 "message": "…"}]
+}
+```
+
+`rows_in == len(resolved) + len(ambiguous) + len(invalid)` always: nothing is
+dropped without a reason, and every invalid row names its source row number.
+
+**No ambiguous row is ever auto-resolved.** `committable` is false while any row
+is ambiguous, and the commit job fails with `ImportRefused` rather than picking
+the most likely contract. Picking one is how a portfolio silently acquires the
+wrong expiry and every downstream number becomes wrong with no error appearing.
+
+The commit is a job. `defaults` supplies what the file does not carry; a
+multiplier is recorded as an assumption on any contract the import creates,
+whether it came from the request or from the platform, because a multiplier
+rescales every value and Greek for that contract.
+
+### 10.3 Valuation
+
+```
+POST /api/v1/portfolios/{portfolio_id}/valuation             -> 202 job
+GET  /api/v1/portfolios/{portfolio_id}/valuation             -> the latest
+GET  /api/v1/portfolios/{portfolio_id}/valuation/{valuation_id}  -> envelope
+GET  /api/v1/portfolios/{portfolio_id}/greeks?dimension=EXPIRY
+```
+
+```jsonc
+{
+  "risk_free_rate": 0.065,
+  "dividend_yield": 0.0,
+  "settlement_time_utc": "10:00:00",   // omit and option Greeks are omitted too
+  "as_of": null                        // omit for the latest snapshot
+}
+```
+
+The whole portfolio is valued against one `MarketState`, and the result and its
+provenance carry the same `market_state_id`. Each position reports
+`market_price` and `model_price` as separate fields — neither is ever written
+from the other — plus `price_used` and a `valuation_method` of `MARKET_MID`,
+`MARKET_LAST`, `STALE_MARKET`, `MODEL_REFERENCE` or `UNAVAILABLE`, and a
+`greek_source` of `MARKET_IV`, `REFERENCE_IV`, `NOT_APPLICABLE` or
+`UNAVAILABLE`.
+
+An unvalued position contributes nothing to the totals and is listed with its
+reason rather than counted as zero; the envelope is then `PARTIAL`. A portfolio
+with no market data at all returns `FAILED` with `PORTFOLIO_NO_MARKET_DATA`,
+never a total of zero.
+
+`GET .../greeks` reads the stored valuation rather than recomputing, so the
+Greeks and the values on the two responses came from one snapshot. Aggregates
+cover `UNDERLYING`, `EXPIRY`, `ASSET_CLASS`, `STRATEGY_TAG` and `CURRENCY`;
+every dimension sums the same per-position numbers and therefore totals to the
+portfolio total.
+
+No portfolio response contains a recommendation, a fair value, or a
+buy/sell signal, and a test asserts it over the whole serialised response.
+
+## 11. Risk **[P5, P6]**
+
+### 11.1 Scenarios
+
+```
+GET    /api/v1/scenarios?include_templates=true
+POST   /api/v1/scenarios
+POST   /api/v1/scenarios/derive
+GET    /api/v1/scenarios/{scenario_id_or_name}
+DELETE /api/v1/scenarios/{scenario_id}
+```
+
+Every scenario carries a `source`, and it is the field that matters:
+
+| Source | Meaning |
+| --- | --- |
+| `HYPOTHETICAL` | A shipped template. Round numbers for illustration, saying so in its own description. |
+| `USER_DEFINED` | Shocks the caller entered. |
+| `DERIVED_FROM_HISTORY` | Computed by `/scenarios/derive` from a series the platform holds. |
+
+`POST /scenarios` always records `USER_DEFINED`, whatever the body says: there
+is no way to *declare* a scenario historical. That label is earned only by
+`/scenarios/derive`, and the model and a database CHECK both refuse a historical
+claim with no derivation attached.
+
+```jsonc
+// POST /scenarios
+{
+  "name": "Gap down",
+  "shocks": [
+    {"kind": "UNDERLYING_PRICE", "shock_type": "PERCENTAGE",   "value": -0.08},
+    {"kind": "VOLATILITY",       "shock_type": "VOL_POINTS",   "value":  0.06},
+    {"kind": "RISK_FREE_RATE",   "shock_type": "BASIS_POINTS", "value": 25.0,
+     "target": null}   // null = every factor of this kind
+  ]
+}
+```
+
+A shock type that makes no sense for its factor is `422 INVALID_SCENARIO` — a
+percentage move in a rate is ambiguous, so it is refused rather than guessed at.
+Shocks of the same kind compose additively; a market-wide -5% plus a name-level
+-3% is -8% on that name and -5% elsewhere.
+
+```jsonc
+// POST /scenarios/derive
+{"name": "Worst recorded day", "underlying_id": "…", "window_days": 1,
+ "percentile": null}   // null = the worst move; a quantile otherwise
+```
+
+Returns a scenario whose `derivation` names the series, its observation count,
+its date range, and the date of the move being reproduced. Fewer than two
+recorded observations is `422 INSUFFICIENT_HISTORY` with the true count — the
+platform will not derive a move from a series that has none in it.
+
+### 11.2 Value at Risk
+
+```
+POST /api/v1/portfolios/{portfolio_id}/var    -> 202 job
+GET  /api/v1/portfolios/{portfolio_id}/var    -> past runs
+```
+
+```jsonc
+{
+  "method": "HISTORICAL",          // or MONTE_CARLO, PARAMETRIC
+  "risk_free_rate": 0.065,
+  "settlement_time_utc": "10:00:00",
+  "horizon_days": 1,
+  "confidences": [0.95, 0.99],
+  "paths": 10000,                  // MONTE_CARLO only
+  "seed": 20260924,                // MONTE_CARLO only; recorded, and required
+  "lookback": null,
+  "include_volatility_factor": true
+}
+```
+
+The result carries, for each confidence level, `value_at_risk` (a threshold
+loss), `expected_shortfall` (the average loss given the threshold is exceeded),
+the observation counts behind both, and an `interpretation` block stating that
+distinction in words. Alongside them:
+
+- `assumptions.repricing` — `"full"` for historical and Monte Carlo, and a
+  string beginning `"none"` for parametric.
+- `factor_panel` — the sources, date range, alignment policy, and the
+  missing-data policy in words. Nothing is forward-filled.
+- `estimate_intervals` — a 90% bootstrap interval for the estimate itself.
+- `worst_scenario_dates` — for the historical method, the recorded dates that
+  hurt most.
+
+Too little history is `FAILED` with `RISK_INSUFFICIENT_HISTORY` and the
+observation count, never a number computed from four observations. A parametric
+run on a book containing options always carries
+`RISK_PARAMETRIC_ON_NONLINEAR_BOOK`.
+
+### 11.3 Stress
+
+```
+POST /api/v1/portfolios/{portfolio_id}/stress   -> 202 job
+GET  /api/v1/portfolios/{portfolio_id}/stress   -> past runs
+GET  /api/v1/portfolios/{portfolio_id}/risk-snapshot
+```
+
+```jsonc
+{"scenario": "Underlying -10%", "time_decay_days": 0.0,
+ "risk_free_rate": 0.065, "settlement_time_utc": "10:00:00"}
+```
+
+`scenario` accepts a template name, a stored scenario's name, or either one's
+id. The result's `pnl` is the **full repricing**. Beside it,
+`greek_approximation` carries the second-order estimate of the same move, its
+difference from the full repricing, the formula used and a caveat saying it is
+not the answer. On the reference book the two differ by more than 5% on a 10%
+move and by under 1% on a 0.1% move.
+
+`contributions` decomposes the loss by underlying, expiry, asset class and
+strategy tag. Each breakdown reports a `residual` (zero while portfolio value is
+a sum over independently repriced positions — it is the check on that, not a
+plug) and an `ungrouped_positions` count for positions that carry no key for
+that dimension.
+
+`shocks` reports the moves as actually resolved, per underlying, in the pricer's
+own units. `floored_volatilities` counts positions whose shocked volatility hit
+the `1e-4` floor.
+
+Every risk run stores a `risk_snapshot` pointing at the `portfolio_valuation` it
+measured, so the chain from a VaR number back to the quotes behind it is a
+sequence of foreign keys.
+
+### 11.4 Margin **[P6]**
+
+```
+GET  /api/v1/margin/models
+POST /api/v1/portfolios/{portfolio_id}/margin              -> 202 job
+GET  /api/v1/portfolios/{portfolio_id}/margin              -> past runs
+GET  /api/v1/portfolios/{portfolio_id}/margin/{margin_id}  -> envelope
+```
+
+**No endpoint here reports a broker's margin.** `GET /margin/models` lists what
+is implemented, and every entry carries `is_broker_equivalent: false` — a field
+that would only ever be true for a model implementing a *published*
+methodology. An unknown model name is `422 UNKNOWN_MARGIN_MODEL` with the
+available ones listed.
+
+```jsonc
+{
+  "margin_model": "SimpleRiskMarginModel",
+  "risk_free_rate": 0.065,
+  "settlement_time_utc": "10:00:00",
+  "grid": {                              // the grid IS the model; it is declared
+    "spot_returns": [-0.2, -0.1, 0.0, 0.1, 0.2],
+    "vol_points": [-0.05, 0.0, 0.05]
+  },
+  "short_option_minimum_rate": 0.0,      // zero on purpose; see below
+  "concentration_add_on_rate": 0.0,
+  "concentration_threshold": 0.5,
+  "eligible_capital": null,              // null = unknown, not zero
+  "ladder": null,                        // null = the default, both directions
+  "vol_co_shock": 0.0
+}
+```
+
+A `spot_returns` grid without `0.0` in it is refused: without an unshocked point
+the grid cannot show that the book is flat where the market actually is.
+
+The two rates default to **zero**, and that is a refusal rather than an
+omission. A short option far out of the money shows almost no loss on a scan
+grid while carrying unbounded tail risk, and a real margin system floors it for
+that reason — but the rate at which it does is a venue's rule. Every response
+with a zero rate carries `MARGIN_NO_SHORT_OPTION_MINIMUM` and says in words
+what the zero leaves out.
+
+The result carries:
+
+- `estimated_margin` — the only number, and its name is the claim. There is no
+  `required_margin` and no field naming a venue.
+- `margin.components[]` — `scan_loss`, `short_option_minimum`,
+  `concentration_add_on`, each with the `basis` it was computed on.
+- `margin.assumptions[]` and `assumptions[]` — the model's and the ladder's, in
+  plain language.
+- `margin.confidence` — coverage, grid containment and mark consistency,
+  combined as a geometric mean.
+- `margin.worst_case` — the grid point that produced the estimate, and whether
+  it sat on the grid's own boundary (`MARGIN_WORST_LOSS_AT_GRID_EDGE`).
+- `buffer`, `utilisation` — `null` when `eligible_capital` was not supplied.
+  They are never defaulted to portfolio value, and a database CHECK enforces it.
+- `ladder[]` — every rung, with the portfolio fully repriced *and* the margin
+  model rerun on that moved market.
+- `shortfall_region.downside` / `.upside` — each an
+  `{approximate_entry, bracketed_by, buffer_before, buffer_after}` **region**,
+  never a price. The interpolated entry always lies between the two rungs that
+  bracket it, and those rungs are reported so the coarseness is visible.
+- `summary` — the sentence rendered verbatim by the UI, stored on the row so
+  that what a user was told stays recoverable.
+
+Every run also carries `MARGIN_IS_A_MODEL_ESTIMATE` as a warning, whose message
+states that this is not the user's broker's or exchange's requirement.
+
+## 12. Execution **[P7, P8]**
+
+### 12.1 Trade-log import
+
+```
+POST /api/v1/execution/trades/preview
+POST /api/v1/execution/trades/import   -> 202 job
+```
+
+The file is uploaded through `POST /uploads` with `kind=TRADES`; an upload of
+another kind is `422 WRONG_UPLOAD_KIND`, and a trade log sent to
+`POST /uploads/{id}/ingest` is `400 WRONG_INGESTION_ROUTE`.
+
+Required fields: `timestamp, symbol, side, quantity, price`. Valuable and
+optional: `order_id, parent_order, order_type, limit_price, submit_timestamp,
+decision_timestamp, order_quantity, broker, fees`.
+
+The preview returns the same three buckets as the portfolio import, and
+`committable` is false while any row is ambiguous. **No ambiguous row is ever
+auto-resolved**: a fill on the wrong contract lands in the wrong parent order and
+drags a benchmark window with it.
+
+Rejections carry their source row number and a reason, including
+`SUBMIT_AFTER_FILL` — a fill timestamped before its own submission is refused
+rather than reconciled, because one of the two stamps is wrong and guessing which
+would corrupt every benchmark for that order.
+
+`defaults.parent_gap_seconds` governs only fills the file did not assign a parent
+to. It is recorded on every report, because a different gap gives different
+parents, windows and benchmarks.
+
+### 12.2 Analysis
+
+```
+POST /api/v1/execution/analyze          -> 202 job
+GET  /api/v1/execution/executions
+GET  /api/v1/execution/reports
+GET  /api/v1/execution/reports/{report_id}
+```
+
+```jsonc
+{
+  "start": null, "end": null,             // whole history by default
+  "instrument_id": null,
+  "parent_order_key": null,
+  "primary_benchmark": "ARRIVAL",
+  "parent_gap_seconds": 300.0,
+  "staleness_tolerance_seconds": 300.0,   // older than this is not "prevailing"
+  "window_padding_seconds": 3600.0        // arrival looks back, close looks forward
+}
+```
+
+Each parent order returns six benchmarks — `ARRIVAL`, `DECISION`,
+`PREVAILING_MID`, `INTERVAL_TWAP`, `INTERVAL_VWAP`, `CLOSE` — and every one
+carries its `window`, `source`, `method` and `observations`. A benchmark the
+available data cannot support carries `available: false` and an
+`unavailable_reason`, and produces **no shortfall** rather than a zero.
+
+Shortfalls report `currency_amount`, `basis_points` and `percent`, with a
+`convention` field stating that positive is always a cost.
+
+`decomposition` splits the primary shortfall into `spread` (`MODELLED`), `fees`
+(`MEASURED`), `impact` (`NOT_MODELLED`, Phase 8) and `timing_residual`
+(`RESIDUAL`), with a `caveat` saying the split is not a measurement.
+
+`market_window.coverage` reports the observation count, the span ratio, the
+largest gap, whether the window is bracketed at each end, and the policy in
+words. `grouping_is_inferred` is on the parent order and on the stored summary
+row, because it changes what every number below it means.
+
+A run with no stored fills in range returns `FAILED` with
+`TCA_NO_EXECUTIONS_IN_RANGE`, never an empty analysis.
+
+### 12.3 Simulation **[P8]**
+
+```
+GET  /api/v1/execution/strategies
+GET  /api/v1/execution/impact-models
+POST /api/v1/execution/simulate                     -> 202 job
+GET  /api/v1/execution/simulations?comparison_id=…
+GET  /api/v1/execution/simulations/{simulation_id}
+```
+
+`GET /execution/strategies` lists what each strategy needs from the caller;
+`GET /execution/impact-models` reports `ships_calibrated_coefficients: false`
+for every entry, because none is calibrated and none ever will be by default.
+
+```jsonc
+{
+  "instrument_id": "…", "side": "BUY", "quantity": "7500",
+  "start": "2026-09-24T09:20:00Z", "end": "2026-09-24T15:20:00Z",
+  "intervals": 6,
+  "strategies": ["TWAP", "VWAP"],
+  "impact_model": "SquareRootImpactModel",
+  "permanent_coefficient": 1.0,      // the identity, not a calibration
+  "temporary_coefficient": 1.0,
+  "volatility": 0.18,
+  "average_daily_volume": 500000.0,
+  "lot_size": "75",
+  "expected_volumes": [30000, 12000, 8000, 7000, 9000, 25000],
+  "spreads": null, "volatilities": null,
+  "participation_rate": 0.10,
+  "latency_seconds": 0.0,
+  "max_price_age_seconds": null      // null = the window's own tolerance
+}
+```
+
+A per-interval input must cover **every** interval or the request is `422`: a
+partial profile would leave the rest of the schedule silently assuming
+something. Unknown strategies and impact models are `422` with the available
+ones listed, and an unknown instrument is `404` before a job is created.
+
+**Every number in the result is a counterfactual estimate.** The result's
+`counterfactual` flag is `true`, its `caveat` says the schedules were never
+executed and that running one would itself have moved the path, and
+`COUNTERFACTUAL_ESTIMATE` is the envelope's first warning. A database CHECK
+makes an unlabelled row unstorable.
+
+Per strategy the result carries the schedule (with every slice), the simulated
+fills (observed price, price after accumulated permanent impact, fill price,
+spread and impact per unit), `completion_rate`, `average_price`,
+`modelled_impact_cost`, `modelled_spread_cost`, the Phase 7 benchmarks computed
+on the simulated fills, and any `unfilled` slices with their reasons.
+
+`unavailable` lists the strategies that could not run and why — a VWAP on a flat
+profile refuses because it would be a TWAP, and reporting it under the VWAP name
+would make the comparison meaningless.
+
+`comparison_caveat` states that the result is **not a ranking**, that no strategy
+is recommended, and that the differences between them are smaller than the
+uncertainty in an uncalibrated impact coefficient. There is no `best_strategy`
+field, and a test asserts no such key exists.
 
 ## 13. Unified order analysis _(planned — P11)_
 

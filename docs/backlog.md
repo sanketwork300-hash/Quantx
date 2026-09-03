@@ -174,75 +174,204 @@ our own synthetic provider would produce loadings that describe the generator,
 not a market — precisely the claim `docs/risks.md` R1 says synthetic data must
 never be used to support. It ships when real historical surfaces exist.
 
-## Phase 4 — Portfolio  `[ ]`
+## Phase 4 — Portfolio  `[x]`
 
-- [ ] Portfolio + position CRUD; CSV import with column mapping and preview
-- [ ] Instrument resolution with `resolved / ambiguous / invalid` buckets
-- [ ] Position valuation, per-position Greeks, currency conversion
-- [ ] Aggregation by underlying / expiry / asset class / currency
+- [x] Portfolio + position CRUD, ownership-scoped on every route
+- [x] CSV import with column-mapping inference and a mandatory preview
+- [x] Instrument resolution with `resolved / ambiguous / invalid` buckets
+- [x] Position valuation with `market_price` and `model_price` in separate
+      columns, and `valuation_method` naming which one was used
+- [x] Per-position Greeks scaled once, by signed quantity times multiplier
+- [x] Currency conversion at the rate in the same `MarketState` as the prices
+- [x] Aggregation by underlying / expiry / asset class / strategy tag / currency
+- [x] `VALUE_PORTFOLIO` and `IMPORT_POSITIONS` job handlers
+- [x] UI: portfolio list, import wizard with the three buckets, valuation
+      dashboard with Greeks by group
 
-**Acceptance**: sum of position values equals portfolio value within tolerance
-(property test); ambiguous rows are never auto-resolved; every valuation records
-`valuation_method`.
+**Acceptance — verified**
 
-## Phase 5 — Risk  `[ ]`
+| Criterion | Where |
+| --- | --- |
+| The sum over positions equals the portfolio total, for value and for every Greek | `test_portfolio_valuation.py::TestSumProperty` (hypothesis, arbitrary long/short mixes), `TestTotalsReconcile`, `test_portfolio.py::test_the_sum_over_positions_equals_the_portfolio_total` |
+| Every aggregate dimension sums to the same portfolio total | `test_portfolio_valuation.py::test_every_aggregate_dimension_sums_to_the_portfolio_total`, `test_portfolio.py::test_each_grouping_sums_to_the_portfolio_total` |
+| An ambiguous row is never auto-resolved | `test_position_import.py::TestAmbiguity` — no resolution, no instrument created, and the preview is not committable |
+| A commit is refused while any row is ambiguous | `domains/portfolio/application.py::ImportRefused` |
+| Every valuation records `valuation_method` | `test_portfolio_valuation.py::TestMethodIsAlwaysRecorded` over all five methods; `base_market_value is None` exactly when the method is `UNAVAILABLE` |
+| Observations and model estimates stay in separate fields | `test_portfolio_valuation.py::TestObservationAndEstimateAreSeparate`, `test_portfolio.py::test_position_detail_keeps_observation_and_estimate_apart` |
+| Nothing is dropped without a reason | `test_position_import.py::test_nothing_is_dropped_without_a_reason` — `input == resolved + ambiguous + invalid` |
+| Every rejected row names its source row number and reason | `test_position_import.py::TestRejections`, `test_portfolio.py::test_every_rejected_row_names_its_row_number_and_reason` |
+| One snapshot prices the whole portfolio | `test_portfolio.py::test_one_snapshot_priced_the_whole_portfolio` — the provenance and the result carry the same `market_state_id` |
+| A portfolio route never serves another user's portfolio | `test_portfolio.py::TestPortfolioCrud` — 404, never 403 |
+| No portfolio response contains advisory language | `test_portfolio.py::TestLanguage` — asserted over the whole serialised response |
 
-- [ ] Historical VaR with full repricing for nonlinear books
-- [ ] Parametric VaR (assumptions stated in the response)
-- [ ] Monte Carlo VaR (job) with seed reproducibility
-- [ ] Expected shortfall
-- [ ] Scenario engine + shock types; stress with full revaluation
-- [ ] Risk contribution by instrument / underlying / expiry / asset class
-- [ ] UI: portfolio dashboard, stress lab
+**What is deliberately not here**: an ambiguity-resolution UI that lets a user
+pick a candidate per row. The current behaviour is to refuse and say why, which
+is correct but blunt; per-row selection is a Phase 5 refinement, not a gap in
+the guarantee.
 
-**Acceptance**: VaR recovers the analytic quantile on synthetic distributions;
-MC is seed-reproducible; stress on an option book reprices rather than
-extrapolating Greeks, and a test proves the two differ for a large shock.
+## Phase 5 — Risk  `[x]`
 
-## Phase 6 — Margin  `[ ]`
+- [x] Historical VaR with full repricing for nonlinear books
+- [x] Parametric VaR, with its invalidity for option books stated in the response
+- [x] Monte Carlo VaR (job) with seed reproducibility and a bootstrap interval
+- [x] Expected shortfall, always beside VaR, with the distinction spelled out
+- [x] Scenario engine with four shock types; stress with full revaluation
+- [x] The Greek approximation of the same move, reported beside it and labelled
+- [x] Risk contribution by underlying / expiry / asset class / strategy tag
+- [x] Factor histories assembled from ingested chains and calibrated surfaces,
+      with an explicit alignment and missing-data policy
+- [x] `RUN_VAR` and `RUN_STRESS` job handlers
+- [x] UI: risk dashboard and stress lab, scenario library
 
-- [ ] `MarginModel` ABC + `SimpleRiskMarginModel`
-- [ ] Margin utilisation, shock-grid evaluation, margin-buffer curve
-- [ ] Estimated margin-shortfall region
+**Acceptance — verified**
 
-**Acceptance**: every margin result carries method, assumptions, confidence and
-warnings; no output names a broker or claims broker equivalence; the shortfall
-output is a region with assumptions, never a single guaranteed price.
+| Criterion | Where |
+| --- | --- |
+| Historical VaR recovers the analytic quantile on synthetic distributions | `test_var.py::TestHistoricalRecoversTheAnalyticQuantile` — normal at four confidences to within three sampling standard errors, uniform to 1e-9, plus a shift-and-scale equivariance check |
+| Expected shortfall recovers its closed form | `test_var.py::TestHistoricalRecoversTheAnalyticQuantile::test_expected_shortfall_recovers_its_analytic_value`, `TestParametricMatchesTheClosedForm` |
+| Monte Carlo is seed-reproducible | `test_var.py::TestSimulation` (including a hypothesis property over paths and seeds), `test_revaluation.py::test_monte_carlo_is_reproducible_from_its_seed`, `test_risk.py::test_monte_carlo_records_its_seed_and_repeats_exactly` |
+| Stress reprices rather than extrapolating Greeks, and the two differ for a large shock | `test_revaluation.py::TestFullRevaluationVersusGreeks` — >5% divergence on a 10% move, <1% on a 0.1% move, error monotone in shock size, exact agreement on a linear book; `test_risk.py::test_a_sell_off_reprices_rather_than_extrapolating` |
+| A null scenario reprices to exactly the base value | `test_revaluation.py::TestTheNullScenario` — the property that makes every P&L below meaningful |
+| The vectorised repricing agrees with the scalar one | `test_revaluation.py::TestVectorisedAgreesWithScalar`, including a hypothesis property |
+| Contributions decompose the loss exactly | `test_revaluation.py::test_the_cheap_decomposition_matches_holding_each_group_flat` — checked against the costly hold-one-group-flat construction |
+| No scenario claims to be historical without the data behind it | `test_scenarios.py::TestNoInventedHistory` — templates are all `HYPOTHETICAL`, none is named after a real event, and a historical claim without a derivation is refused by the model *and* by a database CHECK |
+| Too little history is a refusal, not a number | `test_risk.py::test_a_portfolio_with_no_history_refuses_rather_than_answering`, `test_an_underlying_with_one_observation_is_refused_not_invented` |
+| Nothing is forward-filled across a gap | `test_revaluation.py::TestFactorPanel::test_nothing_is_forward_filled_across_a_gap` |
+| An unpriceable position is reported, never treated as riskless | `test_revaluation.py::TestExclusions` |
+| No risk response contains advisory language | `test_risk.py::TestLanguage` — asserted over the whole serialised response |
 
-## Phase 7 — Execution TCA  `[ ]`
+**What is deliberately not here**: GARCH filtering, copulas, fat-tailed
+calibration and factor models beyond spot and volatility. A Student-t simulation
+exists and is validated, but nothing calibrates its degrees of freedom, so it is
+a parameter the user sets rather than a claim the platform makes.
 
-- [ ] Trade-log upload, parent/child grouping
-- [ ] Benchmarks: arrival, decision, prevailing mid, VWAP, TWAP, close
-- [ ] Implementation shortfall (currency / bps / %)
-- [ ] Model-based cost decomposition + data-coverage reporting
-- [ ] UI: execution dashboard
+## Phase 6 — Margin  `[x]`
 
-**Acceptance**: deterministic synthetic price paths produce hand-checkable IS
-values; every benchmark reports its window, source and method; low data coverage
-degrades to `PARTIAL`, never to a confident wrong number.
+- [x] `MarginModel` ABC + `SimpleRiskMarginModel`
+- [x] Margin utilisation, shock-grid evaluation, margin-buffer curve
+- [x] Estimated margin-shortfall region, bracketed by the rungs that locate it
+- [x] `RUN_MARGIN` job handler
+- [x] UI: margin page with the buffer curve and no liquidation marker
 
-## Phase 8 — Execution simulation  `[ ]`
+**Acceptance — verified**
 
-- [ ] `ExecutionStrategy` ABC; TWAP, VWAP, POV, liquidity-adaptive
-- [ ] `MarketImpactModel` ABC; square-root and linear baselines
-- [ ] Counterfactual simulator; strategy comparison
+| Criterion | Where |
+| --- | --- |
+| Every margin result carries method, assumptions, confidence and warnings | `test_margin.py::TestResultCompleteness::test_every_result_carries_all_four`, `test_margin.py (integration)::test_the_result_carries_method_assumptions_confidence_and_warnings` |
+| No output names a broker or claims broker equivalence | `test_margin.py::TestNoBrokerClaim` — the serialised payload is scanned for venue names and affirmative claims, `/margin/models` reports `is_broker_equivalent: false` for every model, and no result field could be read as a requirement |
+| "Liquidation" appears only inside its own denial | `test_margin.py::test_liquidation_is_only_ever_mentioned_to_deny_it` — every occurrence must be preceded by "not a broker" |
+| The shortfall output is a region with assumptions, never a guaranteed price | `test_margin.py::TestVulnerabilityIsARegion` — the crossing is interpolated and reported with the two rungs that bracket it, and the interpolated point must lie between them |
+| Unknown capital yields no buffer and no utilisation | `test_margin.py::TestCapitalIsNeverAssumed`, enforced again by `ck_margin_buffer_requires_capital` in the schema |
+| The optional components default to zero and say what that leaves out | `test_margin.py::TestWhatTheDefaultsLeaveOut` — the warning text must contain "inventing a rule" |
+| A worst case at the grid boundary is flagged and lowers confidence | `test_margin.py::test_a_worst_case_at_the_edge_is_flagged_and_lowers_confidence`, and a contained worst case is not flagged |
+| Both sides of the buffer are remeasured at every rung | `test_margin.py::test_both_sides_of_the_buffer_move_along_the_ladder` |
+| An upside shortfall is found, not only a downside one | `test_margin.py::test_an_upside_short_is_found_too` |
+| The estimate is never negative, for any book | `test_margin.py::test_the_estimate_is_never_negative` (hypothesis) |
 
-**Acceptance**: every simulated result is labelled a counterfactual estimate;
-schedules sum to the parent quantity; impact models are unit-tested against
-closed-form expectations.
+**What is deliberately not here**: `SPANApproximation`, the crypto cross- and
+isolated-margin models, and `BrokerApproximationModel`. Each of those requires a
+*published* methodology to implement against, and shipping one without would be
+the exact failure this phase is built to avoid. The `MarginModel` interface
+exists so they can be added when a methodology is in hand.
 
-## Phase 9 — Advanced derivatives  `[ ]`
+## Phase 7 — Execution TCA  `[x]`
 
-- [ ] SSVI / arbitrage-aware global surface
-- [ ] Dupire local volatility from a smooth surface, with invalid regions
-- [ ] Crank-Nicolson PDE pricer (+ optional MC)
-- [ ] Heston (characteristic function or QuantLib), constrained calibration
-- [ ] Model consensus + confidence; risk-neutral density
-- [ ] Higher-order Greeks: vanna, volga, charm
+- [x] Trade-log upload, parent/child grouping, explicit or inferred and flagged
+- [x] Benchmarks: arrival, decision, prevailing mid, interval VWAP, interval
+      TWAP, close — each with its window, source and method
+- [x] Implementation shortfall in currency, basis points and percent
+- [x] Model-based cost decomposition with data-coverage reporting
+- [x] `IMPORT_TRADES` and `ANALYZE_EXECUTIONS` job handlers
+- [x] UI: execution dashboard
 
-**Acceptance**: with constant local vol the PDE converges to Black-Scholes
-(order-of-convergence test); Heston cross-checks against QuantLib; consensus
-output exposes dispersion and never a single "true" price.
+**Acceptance — verified**
+
+| Criterion | Where |
+| --- | --- |
+| A deterministic synthetic price path produces hand-checkable IS values | `test_tca.py::TestHandCheckableShortfall` — a path rising 1.00 per minute, an average of exactly 104 against an arrival of 100, giving 1200 in currency, 400 bps and 4% by hand; the multiplier scales only the currency amount; the same fills sold into the same path give exactly the negative |
+| Every benchmark reports its window, source and method | `test_tca.py::TestEveryBenchmarkDeclaresItself`, `test_execution.py::test_every_benchmark_reports_window_source_and_method` |
+| Low data coverage degrades, never to a confident wrong number | `test_tca.py::TestDataCoverage` — two ticks refuse, four ticks clustered in a corner refuse, and the interval VWAP refuses for want of interval volume rather than silently becoming a TWAP under a volume-weighted name |
+| A missing benchmark produces a missing shortfall, not a zero | `test_tca.py::test_a_missing_benchmark_produces_no_shortfall_rather_than_zero`, and `ck_report_shortfall_needs_benchmark` in the schema |
+| An arrival proxy is flagged, and understates the cost | `test_tca.py::TestArrivalProxy` — the proxied shortfall is provably smaller than the properly benchmarked one |
+| An inferred parent grouping is flagged, and the gap that produced it is recorded | `test_tca.py::TestGrouping`, `test_execution.py::test_the_gap_changes_the_grouping_and_is_recorded` |
+| No ambiguous row is auto-resolved | `domains/execution/application.py::ImportRefused`, mirroring the portfolio import |
+| Every rejected row names its source row number and reason | `test_execution.py::test_every_rejected_row_names_its_row_number_and_reason` — four distinct reasons in the committed fixture |
+| The decomposition is labelled model-based, with impact explicitly not modelled | `test_tca.py::TestDecomposition`, `test_execution.py::TestDecomposition` — only fees are labelled `MEASURED` |
+| The components reconcile to the measured total | `test_tca.py::test_the_components_reconcile_to_the_total`, asserted again over the wire |
+| A fill cannot precede its own submission | `TradeRejection.SUBMIT_AFTER_FILL` and `ck_execution_submit_not_after_fill` |
+
+**What is deliberately not here**: a market impact model. Methodology §16 places
+it in Phase 8, so the decomposition reports impact as `NOT_MODELLED` and states
+that it is inside the timing residual rather than putting a number there. The
+interval VWAP is unavailable on every window the platform can currently build,
+because option quotes carry cumulative session volume rather than interval
+volume — the benchmark exists, is tested, and reports why it cannot run.
+
+## Phase 8 — Execution simulation  `[x]`
+
+- [x] `ExecutionStrategy` ABC; TWAP, VWAP, POV, liquidity-adaptive
+- [x] `MarketImpactModel` ABC; square-root and linear baselines, plus a zero
+      model for isolating the schedule from the impact assumption
+- [x] Counterfactual simulator; strategy comparison
+- [x] `SIMULATE_EXECUTION` job handler
+- [x] UI: simulation page with the schedules side by side
+
+**Acceptance — verified**
+
+| Criterion | Where |
+| --- | --- |
+| Every simulated result is labelled a counterfactual estimate | `test_execution_simulation.py::TestEverySimulationIsLabelled` — on the result, in the payload's own `caveat`, on the comparison, and asserted for arbitrary latencies by a hypothesis property; `ck_simulation_is_always_counterfactual` makes an unlabelled row unstorable |
+| Schedules sum to the parent quantity | `TestSchedulesSumExactly` — a hypothesis property over arbitrary weights, totals and lot sizes, plus a second over TWAP schedules; `Schedule.__post_init__` raises if they ever do not |
+| Impact models are unit-tested against closed-form expectations | `TestImpactAgainstClosedForms` — `eta*sigma*sqrt(Q/ADV)` and its linear counterpart checked at three parameter sets, quadrupling size doubling square-root impact, and the two models agreeing exactly at full participation |
+| A comparison is not a ranking and recommends nothing | `test_there_is_no_best_or_recommended_field` (no such key anywhere in the payload) and `test_recommendation_is_only_ever_mentioned_to_deny_it` |
+| No impact model ships a calibrated coefficient | `TestImpactRefusesToInvent`, `test_no_impact_model_ships_a_calibrated_coefficient`; the default is the identity and every result computed with it is flagged |
+| A strategy whose inputs are missing refuses rather than degrading | `TestStrategiesRefuseRatherThanDegrade` — VWAP on a flat profile refuses because it would be TWAP, liquidity-adaptive on flat signals refuses because it would be VWAP, POV refuses when the window cannot absorb the order |
+| A stale price leaves the slice unfilled, and the completion rate says so | `TestUnfilledSlices` — with the tolerance widened deliberately the same schedule completes, and the parameter is recorded on the row |
+| Permanent impact accumulates and temporary impact does not | `test_permanent_impact_accumulates_across_slices`, `test_the_participation_rate_drives_the_temporary_term_only` |
+| Simulated fills are scored by the same machinery as real ones | `test_the_simulated_fills_are_scored_by_the_phase_7_machinery` |
+
+**What is deliberately not here**: Almgren-Chriss, Hawkes-adaptive scheduling,
+and any calibrated impact coefficient. The first two are named as later work in
+`docs/execution.md`; the third would require fitting to executions this platform
+has not seen, and shipping someone else's published estimate as a default would
+assert a measurement of a market nobody here observed.
+
+## Phase 9 — Advanced derivatives  `[x]`
+
+- [x] SSVI global surface, calendar-arbitrage-free by construction
+- [x] Dupire local volatility from that surface, with invalid regions kept as
+      holes that carry their reasons
+- [x] Crank-Nicolson PDE with Rannacher start-up, plus a seeded Monte Carlo
+- [x] Heston by characteristic function (little-trap branch), constrained
+      calibration with Feller reported and optionally enforced
+- [x] Model consensus with enumerable confidence; Breeden-Litzenberger density
+- [x] Higher-order Greeks: vanna, volga, charm
+- [x] `CALIBRATE_GLOBAL_SURFACE` and `PRICE_CONSENSUS` job handlers
+- [x] UI: global surface page (term structure, local-vol grid, density, Heston)
+      and a consensus page that draws the range before the median
+
+**Acceptance — verified**
+
+| Criterion | Where |
+| --- | --- |
+| With constant local vol the PDE converges to Black-Scholes at the order it claims | `tests/quant_validation/test_pde.py::TestOrderOfConvergence` — empirical order 2.00 for price, 2.00-2.03 for delta and gamma, on both a uniform and a concentrated grid; gamma is the strict one, and it reported order 1 until the solution interpolation was widened from a 3-point quadratic to a 5-point quartic |
+| Heston cross-checks against QuantLib | `TestAgainstQuantLib::test_price_matches_quantlib` — 8 cases x calls and puts, worst absolute difference 1.5e-11 against `AnalyticHestonEngine`, including 7-day, deep-OTM, 5-year and 10-year with Feller violated |
+| Consensus exposes dispersion and never a single "true" price | `tests/unit/test_consensus.py::TestNoSinglePrice` and `tests/integration/test_advanced_derivatives.py::TestModelConsensus` — the median is asserted to lie inside the range, the range and the dispersion are always present, and `test_there_is_no_field_that_could_hold_a_verdict` scans every key in the payload for `best_model`, `true_price`, `fair_value`, `recommendation` and `signal` |
+| SSVI cannot contain calendar arbitrage | `TestGlobalSurface::test_calendar_arbitrage_is_structurally_impossible` and `TestCalibration::test_an_inverted_observed_term_structure_is_made_monotone`; `ck_converged_global_surface_is_arbitrage_free` makes a CONVERGED row with a decreasing term structure or a negative density unstorable |
+| Butterfly freedom is checked two ways | `TestArbitrageConditions` — the Theorem 4.2 bounds are sufficient, not necessary, so Durrleman's `g >= 0` is evaluated numerically alongside them and both are stored |
+| The Dupire surface reprices the surface it came from | `test_pde.py::TestDupireConsistency` — under 0.2% across three strikes and two maturities. It was 1.6-2.3% until two errors were fixed: one fixed forward used at every time step instead of the forward to each time, and a variance term structure clamped flat below the first expiry instead of running to zero at the origin |
+| A local-volatility hole is a hole with a reason | `TestLocalVolatility::test_invalid_regions_are_holes_with_reasons`; `ck_local_vol_grid_conserves_points` enforces `total = valid + flagged` |
+| A quantile is withheld from an inadmissible density | `TestDensity::test_quantiles_exist_only_for_an_admissible_density`; `ck_density_quantiles_require_admissibility` makes the row unstorable |
+| Every model reports a value or a reason, never neither | `test_every_model_reports_a_value_or_a_reason`; `ck_model_value_has_value_or_reason` enforces the exclusive-or in the database |
+| Confidence can always be taken apart | `TestConfidence` — every contribution carries its basis, one zero dimension drives the score to zero, and agreement saturates rather than ramping to zero so a 5.1% and a 50% spread are distinguishable |
+| Calibrations are reproducible from their seeds | `test_the_calibration_is_reproducible` for SSVI and Heston, `TestReproducibility` for the consensus |
+| A stored surface does not disclaim its own forwards | `test_a_stored_surface_keeps_the_provenance_of_its_forwards` and the `extrapolation` assertion in `test_confidence_can_always_be_taken_apart`. Found by the live walkthrough, not by the suite: the forward method and confidence were being dropped on write, so a surface read back flagged every value `LOW_CONFIDENCE_FORWARD` and took the consensus confidence from 0.998 to 0.904 for a reason that was not true |
+| An unidentified parameter is caveated, not presented as a measurement | `test_a_short_term_structure_says_mean_reversion_is_not_identified` and `test_a_caveated_calibration_travels_with_the_price_it_produced` — two expiries pin `kappa * theta` and not the two separately, so the calibration says so and the consensus repeats it on the price |
+
+**What is deliberately not here**: American exercise, a jump-diffusion or rough
+volatility model, and any use of the implied density as a forecast. The first
+two are named as later work in `docs/pricing.md`; the third is a category error
+the density payload states in its own `interpretation` field.
 
 ## Phase 10 — Microstructure  `[ ]`
 

@@ -52,6 +52,20 @@ disagreement, spread, liquidity, extrapolation, data quality and quote age.
 Explanations are grounded in those metrics. The anomaly vocabulary excludes
 "underpriced" / "arbitrage" by policy, checked in review.
 
+**Status: implemented in Phase 9, and enforced rather than reviewed.** The
+consensus payload has no `best_model`, `fair_value` or `true_price` field, a
+test scans every key at every depth for one, and the stored row has no column
+that could hold it. Every confidence contribution carries the basis that
+produced it, so "why is this 0.42?" is answerable from the response. The
+`interpretation` field says in the response itself that the median is not a
+price the contract is worth and that the spread is a statement about model risk
+rather than about the market.
+
+**Residual risk.** The four models are not independent — three of them read the
+same fitted surface — so a narrow dispersion is weaker evidence than it looks.
+That is stated in `docs/references.md` and is why the individual model values
+are shown alongside the range rather than only summarised by it.
+
 ## R5. Timestamp inconsistency across a calculation  — **MEDIUM-HIGH**
 
 Mixing a 09:15 delta with a 09:47 vega produces a risk number that never existed.

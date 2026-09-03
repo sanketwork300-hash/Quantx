@@ -155,6 +155,23 @@ Cross-domain reads go through a **service interface**, never through another
 domain's SQLAlchemy models. `domains/risk` asks `domains/portfolio` for a
 valued portfolio; it does not `SELECT` from `positions`.
 
+### One edge the graph above does not draw
+
+`domains/portfolio/valuation.py` imports `domains.derivatives.surface`, and the
+graph should be read with that in mind. The import is of a **frozen value
+object** — `VolatilitySurface` performs no I/O and holds no session; its
+`reference()` is a pure function of persisted parameters. Valuation needs to
+price an unquoted option off a fitted surface, and the alternatives were worse:
+copying the SVI evaluation into the portfolio domain would create a second
+implementation to keep in step, and passing the parameters as loose floats would
+lose the flags and the extrapolation checks the value object carries.
+
+What portfolio does *not* do is load a surface. Every database-level fan-out
+goes through `domains/reports/composition.py::ValuationContextComposer`, which
+section 4 designates as the only domain permitted to reach across engines. The
+layering check enforces the part that matters — no domain may import another
+domain's `orm` or `repository` — and this dependency is on neither.
+
 ## 4. Domain boundaries
 
 | Domain | Owns | Does not own |
@@ -457,3 +474,371 @@ material from two engines. Market data owns quotes and curves; derivatives owns
 surfaces. Rather than have either import the other, `MarketStateComposer` in
 `domains/reports` assembles both halves — which is exactly the role section 4
 assigns that domain, and the layering check enforces it.
+
+## 18. What Phase 4 adds
+
+- `domains/portfolio/models.py`: `Position` with a signed quantity whose sign and
+  `side` must agree, and `PositionValuation` with `market_price` and
+  `model_price` as separate fields.
+- `domains/portfolio/importer.py`: column-mapping inference over position files,
+  instrument resolution into `resolved / ambiguous / invalid`, and the refusal to
+  auto-resolve.
+- `domains/portfolio/valuation.py`: the price waterfall, per-position Greeks,
+  currency conversion at the snapshot's own rate, and aggregation over five
+  dimensions.
+- `domains/reports/composition.py`: `ValuationContextComposer`, one `MarketState`
+  plus the fitted surfaces for every underlying a portfolio touches.
+- Persistence: `portfolios`, `positions`, `portfolio_valuations`,
+  `position_valuations`.
+- API: portfolio and position CRUD, the two-step import, valuation as a job, and
+  Greeks by group.
+- Web: portfolio list, import wizard showing the three buckets, and a valuation
+  dashboard.
+
+### The separation is enforced in three places, not one
+
+The rule that a model estimate must never overwrite an observation is easy to
+state and easy to erode. Phase 4 holds it in the schema (`market_price` and
+`model_price` are distinct columns, with no column that could hold either), in
+the type (`PositionValuation` mirrors the same split, and `valuation_method`
+names which one was used), and in the tests (both a unit test on the service and
+an integration test over the serialised response). The database `CHECK` closes
+the remaining gap: a row with no value must carry `UNAVAILABLE`, so an unpriced
+position cannot be recorded as worth zero.
+
+### Aggregation reuses the position numbers rather than recomputing
+
+Every aggregate dimension sums the *same* per-position `base_market_value` and
+the same per-position Greeks. This is why each grouping totals to the portfolio
+total, and why a property test can assert it over arbitrary mixes of long and
+short legs. A dimension that recomputed from raw quotes would drift from the
+position rows the moment either changed, and the drift would look like a rounding
+problem rather than the double implementation it actually is.
+
+## 19. What Phase 5 adds
+
+- `quant/statistics/var.py`: sample and parametric tail risk, a normal quantile
+  accurate to machine precision in both tails, and a bootstrap interval.
+- `quant/statistics/covariance.py`: the sample estimator, with its noise and
+  rank conditions reported rather than regularised away.
+- `quant/simulation/paths.py`: a seeded, antithetic, explicitly-parameterised
+  factor simulation.
+- `domains/scenarios/`: shocks, scenarios, the shipped hypothetical templates,
+  and derivation of a genuinely historical scenario from recorded data.
+- `domains/risk/exposure.py`: the anchors both the base and the shocked price
+  are computed from.
+- `domains/risk/revaluation.py`: full repricing, one scenario at a time and
+  vectorised across many, plus the Greek approximation of the same move.
+- `domains/risk/stress.py`, `var.py`, `factors.py`, `application.py`, `jobs.py`.
+- `domains/reports/composition.py`: `FactorHistoryComposer`, the second
+  cross-engine fan-out.
+- Persistence: `stress_scenarios`, `risk_snapshots`, `var_results`,
+  `stress_results`.
+- API: the scenario library, derivation, VaR and stress as jobs.
+- Web: a risk dashboard, a stress lab, and the scenario library.
+
+### The base price had to become a model price
+
+Under a shock nobody quoted anything, so a stressed price can only come from a
+model. That forces a decision about the *base* price, and the obvious choice —
+compare the model's shocked price against the market's observed price — is
+wrong: the difference would then contain the model's disagreement with the
+market as well as the shock, and a scenario with no shocks in it would report a
+P&L.
+
+So both sides are priced by one function from one set of anchors, and the anchor
+volatility is the one implied by each position's own observed price. That makes
+the null scenario exactly zero, which is the property every stress number rests
+on, and it is asserted by a test. What it costs is that the model value and the
+marked value can differ; that gap is stored in its own column and reported as a
+warning rather than quietly absorbed.
+
+### Phase 5 reuses Phase 3's history rather than building its own
+
+Historical VaR needs a factor history, and the platform had never stored one on
+purpose. It turned out to have two: `option_chain_snapshots.underlying_price`,
+written once per ingestion since Phase 0, and `surface_characteristics
+.atm_volatility` at standard tenors, written once per calibration since Phase 3
+— and recorded at *fixed* tenors precisely so the series would outlive any one
+expiry.
+
+That is why no price-history ingestion pipeline was added. The lookback a user
+gets is exactly as long as their own ingestion record, which is a real
+constraint; it is reported as an observation count on every answer, and below
+ten aligned observations the response is a refusal rather than a number.
+
+### Extraction boundaries after Phase 5
+
+`domains/risk` imports `domains.portfolio.application` to value a book before
+repricing it, and `domains.scenarios.models` for the shock vocabulary. Both are
+service-level and value-object imports, not persistence, so the layering rule
+holds. The database-level fan-out — one `MarketState` for valuation, two factor
+histories for risk — stays inside `domains/reports/composition.py`.
+
+## 20. What Phase 6 adds
+
+- `domains/risk/margin.py`: the `MarginModel` interface, `ShockGrid`,
+  `MarginParameters`, `MarginResult` and `SimpleRiskMarginModel`.
+- `domains/risk/vulnerability.py`: the buffer ladder and the estimated
+  margin-shortfall region.
+- `domains/risk/exposure.py`: `shifted()`, which produces the book as it would
+  stand in a moved market — the piece that lets a margin model be run *again* at
+  every rung rather than only once at today's prices.
+- Persistence: `margin_results`.
+- API: the model catalogue, margin as a job, and stored results.
+- Web: a margin page with the buffer curve, and no liquidation marker on it.
+
+### Margin is in `domains/risk`, not a domain of its own
+
+Section 4's domain table has no margin domain, and Phase 6 did not add one.
+Margin is a measurement of a portfolio's risk taken with the same exposures,
+the same repricing and the same shock machinery as VaR and stress; splitting it
+out would have meant either duplicating `ExposureSet` or making a new domain
+import another domain's internals. The `MarginModel` ABC provides the extension
+point that a separate package would have been reaching for.
+
+### The phase's real work was deciding what not to compute
+
+Almost every design decision here was about a number *not* produced. There is no
+short-option minimum rate, no concentration rate, no liquidation price, no
+`required_margin` column, and no model claiming broker equivalence — and each
+absence is enforced somewhere a future change would have to notice: a zero
+default with a warning that says what it leaves out, a database CHECK, a test
+that scans the serialised payload for venue names, and a test that permits the
+word "liquidation" only when it is preceded by "not a broker".
+
+The one place a number *had* to be chosen is the shock grid, and it is handled
+by making the grid a declared parameter that travels on every result. A margin
+figure is the worst loss over the moves someone chose to look at; a reader who
+cannot see those moves cannot judge the figure, so they are always in the
+payload.
+
+### `shifted()` earns its place beyond margin
+
+The ladder needs a book that can be *remeasured* in a hypothetical market, not
+just repriced once. `PositionExposure.shifted()` moves the anchors and
+recomputes the base price from them, and sets the reported value equal to the
+model value — because a hypothetical state has no mark, and pretending otherwise
+would make the repricing gap meaningless at every rung but the first. The same
+operation is what a multi-step or path-dependent scenario will need later.
+
+## 21. What Phase 7 adds
+
+- `domains/execution/models.py`: `Execution`, `ParentOrder`, and the grouping
+  that decides what a benchmark window even is.
+- `domains/execution/benchmarks.py`: `MarketWindow`, `DataCoverage` and six
+  benchmarks, each returning either a price with its window, source and method,
+  or an explicit unavailability with a reason.
+- `domains/execution/tca.py`: implementation shortfall in three units, and the
+  model-based decomposition.
+- `domains/execution/importer.py`, `orm.py`, `repository.py`, `application.py`,
+  `jobs.py`.
+- `domains/reports/composition.py`: `ExecutionWindowComposer`, the third
+  cross-engine fan-out.
+- `domains/market_data/service.py`: `instrument_quote_history` and
+  `underlying_level_history`.
+- Persistence: `executions` (append-only), `execution_reports`.
+- API: trade-log preview and import, analysis as a job, reports.
+- Web: the execution dashboard.
+
+### An unavailable benchmark is a first-class result
+
+The obvious shape for a benchmark function is "return a price". That shape has
+no room for the answer this platform most often has to give, which is *"the data
+you hold cannot support this benchmark, and here is why"* — so every benchmark
+returns a `Benchmark` whose `price` may be `None` alongside an
+`unavailable_reason` that is always populated when it is.
+
+The consequence propagates: a benchmark with no price produces no shortfall
+rather than a zero; the analysis carries an `unavailable_shortfalls` list beside
+its `shortfalls` list; and the database refuses to store a shortfall without the
+benchmark price it was measured against. Three layers, one rule, because "no
+benchmark was available" and "the cost was zero" must never render the same way.
+
+### The window comes from work done for other reasons, again
+
+Like Phase 5's factor history, Phase 7's market window is assembled from what
+the platform already stores: the option quotes written with each ingested chain,
+falling back to the underlying level on the snapshot itself. No new ingestion
+path was added.
+
+For most users that data is sparse, and the honest consequence is that the
+interval benchmarks usually refuse. The thresholds are stated constants (four
+observations, sixty percent span), the coverage figures travel on every window,
+and the refusal names the numbers that caused it. A platform that instead
+averaged three ticks into an "interval VWAP" would produce a benchmark no market
+ever traded at, and every cost measured against it would inherit the error
+invisibly.
+
+### Two sign conventions, kept apart on purpose
+
+`positions.quantity` is signed; `executions.quantity` is always positive with
+direction in `side`. That looks like an inconsistency and is not: a position's
+sign says which way you are exposed, a fill's side says what you did, and the
+cost convention that makes a buy above the benchmark and a sell below it read
+the same way lives in exactly one place (`Side.sign`). Sharing one convention
+between the two would give a sign two homes and let them drift.
+
+## 22. What Phase 8 adds
+
+- `domains/execution/impact.py`: the `MarketImpactModel` interface with
+  square-root, linear and zero implementations, and the coefficient the platform
+  refuses to invent.
+- `domains/execution/strategies.py`: the `ExecutionStrategy` interface, TWAP,
+  VWAP, POV and liquidity-adaptive, and the exact allocation that makes a
+  schedule sum to its parent.
+- `domains/execution/simulation.py`: the counterfactual simulator and strategy
+  comparison.
+- Persistence: `execution_simulations`.
+- API: the strategy and impact-model catalogues, simulation as a job, and stored
+  runs.
+- Web: the simulation page.
+
+### The identity is the only honest default for a coefficient
+
+Phase 6 defaulted the margin model's optional rates to **zero**, because a
+plausible-looking 2% would have been an invented venue rule and zero is visibly
+an absence. That answer does not transfer here: an impact model whose
+coefficient is zero is not a model with a missing part, it is a model that says
+trading is free.
+
+So the default is `1.0` — the identity — which makes the output the *shape* of
+the model in units of `sigma * sqrt(Q/ADV)` rather than a magnitude, and every
+result computed that way is flagged `IMPACT_COEFFICIENT_NOT_CALIBRATED`. The
+principle is the same in both phases: never state a number nobody measured. The
+form the refusal takes depends on what a missing number would mean.
+
+### Three layers of "this never happened"
+
+The counterfactual label is not a string in a docstring. It is on the result
+object, in the serialised payload's own `caveat`, first in the envelope's
+warnings, and enforced by `CHECK(counterfactual)` on the table. A hypothesis
+property asserts it survives every path through the simulator.
+
+That redundancy is deliberate. A simulated average price and a real one look
+identical in a table, and the moment one is copied into a report without its
+label it becomes a claim about what happened.
+
+### Refusal propagates one layer up from Phase 7
+
+Phase 7 established that a benchmark the data cannot support returns an explicit
+unavailability rather than a number. Phase 8 applies the same rule to
+strategies: VWAP on a flat profile refuses because it *is* TWAP, and
+liquidity-adaptive on flat signals refuses because it *is* VWAP. Returning
+either under the wrong name would make the comparison between them meaningless,
+which is the only thing the comparison is for.
+
+### The simulator borrows Phase 7's ruler rather than building its own
+
+Simulated fills become `Execution` objects, group into a `ParentOrder`, and run
+through the same benchmark set and shortfall calculation as real fills. Writing
+a second scoring path would have been easier and would have guaranteed that a
+counterfactual and the execution it is compared against eventually diverged for
+reasons having nothing to do with the schedules.
+
+They are not written to `executions`, which stays what happened.
+
+## 23. What Phase 9 adds
+
+- `quant/volatility/ssvi.py` and `ssvi_calibration.py`: the SSVI surface, its
+  admissibility conditions in closed form and numerically, and one constrained
+  SLSQP fit over every expiry at once.
+- `quant/volatility/local_vol.py`: Dupire in total-variance form, with the
+  invalid regions kept as holes.
+- `quant/volatility/density.py`: Breeden-Litzenberger, with four diagnostics and
+  quantiles withheld from an inadmissible density.
+- `quant/numerical/pde.py`: Crank-Nicolson with Rannacher start-up on a
+  concentrated log grid, and an order-of-convergence helper.
+- `quant/pricing/heston.py` and `heston_calibration.py`: the little-trap
+  characteristic function with an adaptive integration limit, and a vega-weighted
+  constrained calibration.
+- `quant/pricing/monte_carlo.py`: seeded, antithetic, control-variate.
+- `quant/pricing/higher_order.py`: vanna, volga and charm, analytic and scaled.
+- `domains/derivatives/global_surface.py`: the domain surface, its reference
+  lookups, and the local-volatility coefficient it hands the PDE.
+- `domains/derivatives/consensus.py`: the `PricingModel` interface, four
+  implementations, and the consensus that never returns one price.
+- `domains/derivatives/advanced.py` and `advanced_jobs.py`: persistence and the
+  two job handlers.
+- Persistence: `global_surfaces`, `global_surface_slices`,
+  `local_volatility_surfaces`, `risk_neutral_densities`, `heston_calibrations`,
+  `model_consensus_runs`, `model_values`.
+- API: global-surface calibration and retrieval, the local-volatility grid, the
+  densities, the Heston fit, and consensus pricing as a job.
+- Web: the global-surface page and the consensus page.
+
+### Two surfaces, not one replaced by the other
+
+Per-expiry SVI describes any single smile better than three shared parameters
+can. SSVI cannot contain calendar arbitrage. Those are different virtues, so
+both are kept, in separate tables, and the difference between them on the same
+analysis is itself a measurement. Adding a `model` column to
+`volatility_surfaces` would have been less code and would have hidden the fact
+that only one of the two carries the structural guarantee.
+
+### The guarantee is a database constraint, not a docstring
+
+`ck_converged_global_surface_is_arbitrage_free` refuses a row that calls itself
+`CONVERGED` while carrying a decreasing variance term structure or a negative
+implied density. This is the same device as Phase 5's
+`ck_scenario_historical_claim_has_derivation`, Phase 6's
+`ck_margin_buffer_requires_capital` and Phase 8's
+`ck_simulation_is_always_counterfactual`: when a rule is the reason a feature
+exists, it gets an enforcement point a refactor cannot walk past.
+
+### A model that cannot run is a row, not a gap
+
+`ck_model_value_has_value_or_reason` makes the exclusive-or a database rule.
+A consensus over three models because the fourth failed and a consensus over
+three because only three were asked for are different results, and only stored
+unavailability distinguishes them. Nothing is defaulted to make a model
+runnable: Heston with no calibration reports itself unavailable rather than
+being priced on a plausible-looking parameter set.
+
+### Testing an order, not an error
+
+The PDE's acceptance criterion is the *rate* at which its error falls, not the
+size of the error. A coarse grid can be close by luck and a wrong scheme can be
+close on one contract; only the order distinguishes a correct second-order
+scheme from an incorrect one. It earned its place immediately: gamma converged
+at first order until the solution interpolation was widened from a three-point
+quadratic to a five-point quartic, and the price and delta looked fine
+throughout.
+
+### The round trip that found two real errors
+
+A local-volatility surface derived from an implied surface must reprice that
+implied surface. Ours was off by 1.6-2.3% and did not improve with refinement,
+which ruled out discretisation. Two causes: the maturity forward was being used
+at every time step instead of the forward to each time, shifting every lookup
+along the smile by the carry; and the variance term structure was clamped flat
+below the first expiry, making `dtheta/dT` zero across the whole front so Dupire
+produced nothing there. Both were invisible in every other test. The error is
+now under 0.2%.
+
+### Two things only a live run found
+
+The integration suite passed while a stored surface was silently dropping the
+forward method and confidence its slices were fitted with. Nothing broke: every
+reference value still came back, and every assertion still held. What changed
+was that a surface read back from the database flagged all of its own values
+`LOW_CONFIDENCE_FORWARD` and quietly took the consensus confidence from 0.998 to
+0.904 for a reason that was not true. The two columns are now stored and
+restored, and a test asserts the round trip rather than the values.
+
+The same run showed a Heston fit with `kappa = 0.043` and `theta = 0.23` against
+a `v0` of 0.015 — parameters that look wrong and are not. Two expiries pin
+`kappa * theta` and not the two separately, and the fit reproduced the observed
+surface to 0.009 volatility points. The calibration now emits
+`HESTON_MEAN_REVERSION_NOT_IDENTIFIED` below three maturities and the consensus
+repeats it as a caveat on the price, because the alternative — presenting an
+unidentified parameter as a measurement — is the failure this platform exists to
+avoid. It is a caveat and not a refusal: the surface is described well, and the
+surface is what the price depends on.
+
+### Deviating from a written plan, in writing
+
+`docs/pricing.md` said Heston would be QuantLib-wrapped. It is implemented
+directly instead, with QuantLib as the test oracle, following the standing rule
+for core numerics in `docs/references.md`. The deviation is recorded in both
+documents rather than left as a discrepancy between the plan and the code.

@@ -1,6 +1,14 @@
 # Arbitrage Diagnostics
 
-Status: **implemented** (Phase 2). Conditions in `docs/methodology.md` section 8.
+Status: **implemented** (Phase 2), extended in Phase 9. Conditions in
+`docs/methodology.md` §§8 and 8d.
+
+Phase 2's validator *detects* calendar arbitrage in a per-expiry SVI surface and
+reports it. Phase 9's SSVI surface cannot contain it: a non-decreasing
+at-the-money variance term structure is the condition itself, it is imposed as a
+constraint during calibration, and `ck_converged_global_surface_is_arbitrage_free`
+refuses to store a converged surface that violates it. Both surfaces are kept,
+because per-expiry SVI still describes any single smile better.
 
 ---
 

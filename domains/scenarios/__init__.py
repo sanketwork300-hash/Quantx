@@ -1,7 +1,10 @@
-"""scenarios domain — not yet implemented.
+"""Scenario and shock definitions, and derivation of scenarios from real data.
 
-Owns scenario and shock definitions and historical stress events, which the risk
-domain applies to a MarketState. The package exists so the dependency graph and
-the phase plan are visible in the tree. See docs/backlog.md (Phase 5) and the
-"Scenarios and stress" section of docs/risk.md.
+Owns the shock vocabulary the risk domain applies to a portfolio. The rule that
+shapes it: a scenario labelled ``DERIVED_FROM_HISTORY`` must carry the series,
+date range and event date it was computed from, enforced by the model and by a
+database CHECK. Shipped templates are labelled ``HYPOTHETICAL`` and none is named
+after a real market event.
+
+See the "Scenarios and stress" section of docs/risk.md.
 """

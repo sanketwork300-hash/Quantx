@@ -135,6 +135,20 @@ async def ingest_upload(
     upload = await market_data.get_upload(upload_id, user.id)
     if upload is None:
         raise NotFound("Upload")
+    if payload.kind is UploadKind.TRADES:
+        raise BadRequest(
+            "WRONG_INGESTION_ROUTE",
+            "Trade logs are imported through the execution engine. Preview with "
+            "POST /execution/trades/preview, then commit with "
+            "POST /execution/trades/import.",
+        )
+    if payload.kind is UploadKind.POSITIONS:
+        raise BadRequest(
+            "WRONG_INGESTION_ROUTE",
+            "Position files are imported into a specific portfolio. Preview with "
+            "POST /portfolios/{portfolio_id}/import/preview, then commit with "
+            "POST /portfolios/{portfolio_id}/import.",
+        )
     if payload.kind is not UploadKind.OPTION_CHAIN:
         raise BadRequest(
             "UNSUPPORTED_INGESTION_KIND",

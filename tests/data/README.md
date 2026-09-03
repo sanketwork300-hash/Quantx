@@ -11,6 +11,8 @@ byte-identical files and the golden-file regression suite can pin exact outputs.
 | --- | --- |
 | `options_chain_clean.csv` | 60 quotes, 2 expiries, 15 strikes. Generated from an admissible raw-SVI slice with total variance increasing in maturity, so the chain is internally arbitrage-free (put-call parity, static bounds, vertical monotonicity, butterfly convexity and calendar consistency, up to tick rounding). Headers are deliberately messy (`STRIKE_PRICE`, `CE_PE`, `EXPIRY_DT`, `LTP`, `OI`) so mapping inference is exercised rather than a schema we would never meet. |
 | `options_chain_bad_quotes.csv` | The same chain with one instance of each failure the pipeline must catch, so "every excluded quote has a reason" is verified against data that actually triggers every reason. |
+| `trades.csv` | Twelve fill rows against the contracts in `options_chain_clean.csv`: two explicitly-parented orders (one buy, one sell) with submit timestamps, three unparented fills that must group by time into two inferred parents, and one instance each of the four rejections a trade log must catch. Fill prices sit on the chain's own mids and the averages are exact — 442/445/448 averages to 445.00, 76/78 to 77.00 — so a shortfall against any benchmark can be checked by hand. Headers are messy again (`TRADE_TIME`, `ACTION`, `FILL_PRICE`, `PARENTORDER`, `COMMISSION`). |
+| `portfolio_options.csv` | Ten position rows against the contracts in `options_chain_clean.csv`: six option legs across both expiries, one index leg, and one instance each of the three rejections a position file must catch. Headers are again messy (`NETQTY`, `AVGPRICE`, `CE_PE`, `TYPE`, `TAG`) so mapping inference is exercised. |
 
 ### What `options_chain_bad_quotes.csv` seeds
 
@@ -30,9 +32,47 @@ Rejected — no quote can be formed at all:
 `NON_POSITIVE_STRIKE`, `UNPARSEABLE_ROW`, `MISSING_EXPIRY`, `NO_PRICE_FIELDS`,
 `MISSING_OPTION_TYPE`.
 
+### What `trades.csv` seeds
+
+Eight rows resolve into four parent orders — two named by the file (`EXPLICIT`)
+and two the platform must infer from a contiguous time window
+(`INFERRED_BY_TIME`), which is what makes the grouping flag testable. Four rows
+do not resolve, one for each rejection a trade log most often carries:
+`NON_POSITIVE_QUANTITY` (a sign where a side belongs), `INCOMPLETE_OPTION` (no
+strike), `SUBMIT_AFTER_FILL` (an order submitted after it filled) and
+`UNRECOGNISED_SIDE`.
+
+The averages are arranged to be exact — 442/445/448 averages to 445.00 and 76/78
+to 77.00 — and the fills sit either side of the chain's own mids (443.975 and
+77.25), so the resulting shortfalls are small and plausible rather than an
+artefact of fixture prices that never matched the market.
+
+### What `portfolio_options.csv` seeds
+
+Seven rows resolve. Three do not, one for each reason a position file most often
+carries: `SIDE_DISAGREES_WITH_QUANTITY` (the row says SHORT against a positive
+quantity), `INCOMPLETE_OPTION` (an option row with no strike) and
+`ZERO_QUANTITY`. Ambiguity cannot be seeded from a file alone — it needs two
+matching contracts in the master — so it is exercised in
+`tests/unit/test_position_import.py` with a stub resolver instead.
+
 Kept, but flagged: `WIDE_SPREAD` (spread widened around the original mid, so
 the price is untouched) and `ILLIQUID_CONTRACT` (zero volume and open
 interest). These prove the engine flags without deleting.
+
+### What Phase 9 uses
+
+Nothing new. The SSVI surface, the Dupire grid, the implied densities, the
+Heston fit and the model consensus all run on `options_chain_clean.csv` through
+the same Phase 1 analysis the per-expiry SVI surface uses. That is the point of
+the comparison: two surfaces fitted from *the same quotes* can be set against
+each other, and a difference between them is a difference between the models
+rather than between two datasets.
+
+The numerical acceptance criteria do not use fixture data at all. The PDE is
+checked against the Black-Scholes closed form on a grid of contracts, and Heston
+against QuantLib on another — both generated in the test, because a committed
+fixture would only record what our own code produced.
 
 ## Planned
 
@@ -40,8 +80,6 @@ Added with the phase that consumes them (see `docs/backlog.md`):
 
 | File | Phase |
 | --- | --- |
-| `portfolio_options.csv` | 4 |
-| `trades.csv` | 7 |
 | `orderbook.parquet` | 10 |
 
 ## A warning about synthetic data

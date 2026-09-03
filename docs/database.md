@@ -294,19 +294,375 @@ target. The absence is the point, and a test asserts it.
 are the evidence the threshold was doing something, and they are the history a
 later scan's time-series z-score is measured against.
 
-### Planned tables (phases 4-11)
+### Phase 4 tables (implemented)
+
+```
+portfolios                          positions
+  id (PK), user_id (FK)               id (PK), portfolio_id (FK)
+  name, base_currency                 instrument_id (FK)
+  description                        quantity   <- signed; negative is short
+       |                             side       <- as supplied, for audit
+       |                             average_price, source, strategy_tag
+       |                             position_metadata
+       |                             CHECK(quantity <> 0)
+       v
+portfolio_valuations                position_valuations
+  id (PK), portfolio_id (FK)          id (PK), valuation_id (FK)
+  user_id (FK), as_of_timestamp       position_id, instrument_id (FK)
+  base_currency                       canonical_key, asset_class
+  market_state_id  <- the snapshot    expiry, strike, option_type
+  positions, valued                   quantity, multiplier, currency
+  base_market_value                   market_price  <- observed
+  unrealized_pnl                      model_price   <- estimated
+  gross_exposure, net_exposure        price_used, valuation_method
+  delta, gamma                        market_value, base_market_value
+  vega_per_vol_point                  fx_rate  <- from the same snapshot
+  theta_per_day, rho_per_bp           unrealized_pnl
+  valuation_methods  <- counts        delta, gamma, vega_per_vol_point
+  aggregates         <- by dimension  theta_per_day, rho_per_bp
+  provenance                          greek_source, implied_volatility
+  CHECK(valued <= positions)          time_to_expiry, quote_age_seconds
+                                      warnings
+                                      CHECK(base_market_value IS NOT NULL
+                                            OR valuation_method='UNAVAILABLE')
+```
+
+`market_price` and `model_price` are separate columns and neither is ever
+written from the other. There is deliberately no single `price` column that
+could hold either: a schema that permits the substitution is a schema where it
+eventually happens. The `CHECK` on `position_valuations` enforces the other half
+of the rule — a row without a value must say `UNAVAILABLE`, so an unpriced
+position can never be silently recorded as worth nothing.
+
+Valuations are append-only. Revaluing a portfolio inserts a new row rather than
+updating the last one, because a risk number from yesterday is evidence about
+yesterday and overwriting it destroys the only record of what was reported.
+
+### Phase 5 tables (implemented)
+
+```
+stress_scenarios                    risk_snapshots
+  id (PK), user_id (FK)               id (PK), user_id (FK)
+  name, description                   portfolio_id (FK)
+  source  <- HYPOTHETICAL |            valuation_id (FK) -> portfolio_valuations
+             USER_DEFINED |            as_of_timestamp, base_currency
+             DERIVED_FROM_HISTORY      market_state_id
+  shocks       <- [{kind, type,        positions, excluded_positions
+                    value, target}]    excluded  <- each with its reason
+  derivation   <- series, date         base_value      <- model, at the anchors
+                  range, event date    reported_value  <- what it is marked at
+  scenario_metadata                    delta, gamma, vega_per_vol_point
+  UQ(user_id, name)                    theta_per_day, rho_per_bp
+  CHECK(source <> 'DERIVED_FROM_       provenance
+        HISTORY' OR derivation              |
+        IS NOT NULL)                        |
+       |                                    +-------------------+
+       |                                    |                   |
+       v                                    v                   v
+  the constraint is the rule:        var_results          stress_results
+  a scenario that claims to            id (PK)              id (PK)
+  come from data must carry            user_id (FK)         user_id (FK)
+  the data it came from                portfolio_id (FK)    portfolio_id (FK)
+                                       snapshot_id (FK)     snapshot_id (FK)
+                                       method               scenario_id (FK, null
+                                       horizon_days           for a template)
+                                       scenarios            scenario_name/_source
+                                       base_value           shocks <- as resolved
+                                       seed  <- MC only     base_value
+                                       tail_risk            shocked_value
+                                       estimate_intervals   pnl  <- full repricing
+                                       assumptions          greek_estimate <- the
+                                       factor_panel                 linear estimate,
+                                       warnings                     stored beside it
+                                       provenance           time_decay_days
+                                       CHECK(scenarios>=0)  floored_volatilities
+                                       CHECK(method <>      contributions, positions
+                                         'MONTE_CARLO'      warnings, provenance
+                                         OR seed IS NOT
+                                         NULL)
+```
+
+Three constraints carry rules that would otherwise live only in prose.
+
+`ck_scenario_historical_claim_has_derivation` makes it impossible to store a
+scenario labelled `DERIVED_FROM_HISTORY` without the series, date range and
+event date behind it. Naming a row "COVID crash" and putting a round -35% in it
+is exactly the fabrication the platform exists not to do, and the schema refuses
+it rather than trusting the service layer to.
+
+`ck_var_monte_carlo_records_its_seed` makes an unreproducible Monte Carlo result
+unstorable. A simulated risk number whose seed was not written down cannot be
+recomputed, and a number that cannot be recomputed is not evidence.
+
+`base_value` and `reported_value` are separate columns on `risk_snapshots` for
+the same reason `market_price` and `model_price` are separate on
+`position_valuations`: the gap between the model at today's anchors and what the
+book is marked at is a fact about the book, not an error to reconcile away.
+
+Every risk row points at the `portfolio_valuations` row it measured, so the
+chain from a VaR number back to the individual quotes is a sequence of foreign
+keys rather than an assertion. Results are append-only; a rerun inserts.
+
+### Phase 6 tables (implemented)
+
+```
+margin_results
+  id (PK), user_id (FK), portfolio_id (FK)
+  snapshot_id (FK) -> risk_snapshots
+  method, model_version   <- which model, at which version, produced this
+  currency, estimated_margin, confidence
+  eligible_capital  <- user-supplied; null means unknown
+  buffer            <- null unless capital is known
+  utilisation       <- null unless capital is known
+  in_shortfall_at_rest, vol_co_shock
+  worst_spot_return, worst_vol_points, worst_loss, worst_at_grid_edge
+  positions, excluded_positions
+  summary        <- the sentence the user was shown, stored verbatim
+  components, assumptions, parameters, shortfall_region, ladder
+  warnings, provenance
+  CHECK(estimated_margin >= 0)
+  CHECK(confidence BETWEEN 0 AND 1)
+  CHECK(eligible_capital IS NOT NULL
+        OR (buffer IS NULL AND utilisation IS NULL))
+```
+
+Note the columns that are **not** here: nothing called `required_margin`,
+nothing naming a broker or a venue, and no liquidation price. The schema is the
+first place a claim about broker equivalence could creep in, so it is the first
+place it is refused.
+
+`ck_margin_buffer_requires_capital` is the same idea as
+`ck_position_valuation_has_value_or_reason` one phase earlier: a derived number
+cannot be stored without the input it was derived from. Defaulting capital to
+portfolio value would produce a confident buffer about a quantity nobody
+supplied.
+
+`summary` is stored rather than regenerated because it is what the user was
+actually told. Newer code producing a different sentence from the same row would
+make the record of that unrecoverable.
+
+### Phase 7 tables (implemented)
+
+```
+executions                          execution_reports
+  id (PK), user_id (FK)               id (PK), user_id (FK)
+  instrument_id (FK)                  instrument_id (FK)
+  upload_id (FK, nullable)            parent_order_key
+  side       <- direction lives here  grouping_method      <- EXPLICIT or
+  quantity   <- always positive       grouping_is_inferred    INFERRED_BY_TIME
+  execution_price                     side, canonical_key
+  exchange_timestamp                  currency, multiplier
+  receive_timestamp                   fills, filled_quantity
+  order_id                            order_quantity  <- null = not stated
+  parent_order_key  <- null means     average_price, fees
+                       the grouping   window_start, window_end
+                       was inferred   primary_benchmark
+  order_type, limit_price             primary_benchmark_price
+  order_quantity                      shortfall_currency / _bps / _percent
+  submit_timestamp                    observations
+  decision_timestamp                  coverage_span_ratio
+  broker, venue, fees                 coverage_is_sufficient
+  source, execution_metadata          benchmarks, shortfalls
+  CHECK(quantity > 0)                 unavailable_shortfalls
+  CHECK(execution_price >= 0)         decomposition, market_window
+  CHECK(fees >= 0)                    warnings, provenance
+  CHECK(submit_timestamp IS NULL      CHECK(filled_quantity > 0)
+        OR submit_timestamp <=        CHECK(window_end >= window_start)
+           exchange_timestamp)        CHECK((primary_benchmark_price IS NULL)
+                                            = (shortfall_currency IS NULL))
+```
+
+`executions` is **append-only**. There is no update method on the repository and
+no correction column: a corrected fill is a new row and both stay. A trade log
+that can be quietly rewritten cannot support a cost analysis anyone should act
+on.
+
+Quantity is positive here and signed on `positions`, deliberately. A position's
+sign says which way you are exposed; a fill's side says what you did. Merging the
+two conventions would create a second place for a sign to drift.
+
+Two constraints carry rules that would otherwise live only in prose.
+
+`ck_execution_submit_not_after_fill` refuses a fill timestamped before its own
+submission. The pair is the basis of every arrival benchmark, so an impossible
+ordering is rejected at the boundary rather than producing a negative delay
+downstream.
+
+`ck_report_shortfall_needs_benchmark` makes a shortfall unstorable without the
+benchmark price it was measured against, in either direction. A cost with no
+benchmark is a number with no meaning, and "no benchmark was available" must not
+be able to render as a cost of zero.
+
+`grouping_is_inferred` is denormalised onto the summary row rather than left
+inside the JSON, because it changes what every other number on the row means and
+a reader scanning a list has to see it.
+
+### Phase 8 tables (implemented)
+
+```
+execution_simulations
+  id (PK), user_id (FK), instrument_id (FK)
+  comparison_id      <- groups the rows of one strategy comparison
+  counterfactual     <- always true, and CHECK(counterfactual) makes
+                        anything else unstorable
+  strategy, impact_model
+  impact_is_calibrated  <- false while the coefficients are the identity
+  side, ordered_quantity, filled_quantity, completion_rate
+  average_price      <- null when nothing filled
+  window_start, window_end
+  latency_seconds, max_price_age_seconds
+  modelled_impact_cost, modelled_spread_cost
+  primary_benchmark, shortfall_currency, shortfall_bps
+  schedule, context, fills, unfilled, benchmarks
+  warnings, provenance
+  CHECK(counterfactual)
+  CHECK(ordered_quantity > 0)
+  CHECK(filled_quantity BETWEEN 0 AND ordered_quantity)
+  CHECK(completion_rate BETWEEN 0 AND 1)
+  CHECK(window_end >= window_start)
+  CHECK((primary_benchmark IS NULL) = (shortfall_currency IS NULL))
+```
+
+The `counterfactual` column exists **only to be constrained**. It is `True` on
+every row and `ck_simulation_is_always_counterfactual` forbids anything else, so
+a simulated result cannot be stored without the label that says it never
+happened — not by a future refactor, not by a bulk insert, not by hand. It is
+the same device as `ck_scenario_historical_claim_has_derivation` in Phase 5 and
+`ck_margin_buffer_requires_capital` in Phase 6: a rule that matters gets an
+enforcement point the code cannot walk past.
+
+Simulated fills live in this row's `fills` JSON and are deliberately **not**
+written to `executions`. That table is what happened.
+
+`docs/database.md` originally planned to put the run detail in the object store.
+It is stored inline instead, because the slice count is bounded by the request
+(at most 200 intervals) so the payload is small, and keeping it in the row means
+a stored counterfactual can be read back with one query rather than two systems
+having to agree.
+
+### Phase 9 tables (implemented)
+
+```
+global_surfaces
+  id (PK), surface_id, user_id (FK), analysis_id (FK), underlying_id (FK)
+  as_of_timestamp, model, model_version, curve_id, status
+  rho, eta, gamma          <- three parameters for the WHOLE surface
+  n_observations, n_slices
+  rmse_total_variance, weighted_rmse, rmse_vol_points, max_error_vol_points
+  optimizer, optimizer_message, iterations
+  starts_attempted, starts_feasible
+  min_durrleman_g          <- the actual butterfly condition, numerically
+  max_butterfly_quantity, butterfly_bounds_satisfied
+                           <- Theorem 4.2's *sufficient* condition
+  calendar_arbitrage_free  <- structural for SSVI, not a diagnostic that passed
+  error, calibration_timestamp, provenance
+  CHECK(status <> 'CONVERGED' OR (rho, eta, gamma all present))
+  CHECK(status <> 'CONVERGED'
+        OR (calendar_arbitrage_free AND min_durrleman_g >= -1e-9))
+
+global_surface_slices
+  id (PK), global_surface_id (FK)
+  expiry, time_to_expiry, forward, discount_factor
+  forward_method, forward_confidence
+                           <- the Phase 1 estimate's own provenance; a surface
+                              that forgot it would flag every reference value
+                              it produced as LOW_CONFIDENCE_FORWARD
+  theta, atm_volatility    <- this expiry's knot in the variance term structure
+  n_observations, rmse_vol_points, max_error_vol_points, k_min, k_max
+  butterfly_first, butterfly_second, butterfly_bounds_satisfied
+  min_durrleman_g
+  UNIQUE(global_surface_id, expiry)
+  CHECK(theta > 0)
+
+local_volatility_surfaces
+  id (PK), user_id (FK), global_surface_id (FK), underlying_id (FK)
+  as_of_timestamp, model_version, spot, carry
+  total_points, valid_points, flagged_points, coverage
+  flag_counts              <- flag name -> count, so a hole is attributable
+  grid                     <- axes, per-point detail, and a matrix with nulls
+  provenance
+  CHECK(total_points = valid_points + flagged_points)
+  CHECK(coverage BETWEEN 0 AND 1)
+
+risk_neutral_densities
+  id (PK), user_id (FK), global_surface_id (FK), underlying_id (FK)
+  expiry, time_to_expiry, forward, discount_factor
+  total_mass, implied_mean, negative_mass, mean_error, is_admissible, flags
+  percentile_5, percentile_25, percentile_50, percentile_75, percentile_95
+  strikes, density, provenance
+  UNIQUE(global_surface_id, expiry)
+  CHECK(is_admissible OR every percentile IS NULL)
+
+heston_calibrations
+  id (PK), user_id (FK), analysis_id (FK), underlying_id (FK)
+  as_of_timestamp, model_version, status
+  v0, kappa, theta, xi, rho
+  n_observations, n_maturities
+  rmse_price, rmse_vol_points, max_error_vol_points
+  optimizer, optimizer_message, iterations, starts_attempted, starts_feasible
+  feller, satisfies_feller, feller_enforced
+  warnings, error, provenance
+  CHECK(status <> 'CONVERGED' OR (all five parameters present))
+  CHECK(NOT feller_enforced OR feller >= -1e-9)
+
+model_consensus_runs
+  id (PK), user_id (FK), global_surface_id (FK), heston_calibration_id (FK)
+  instrument_id (FK), underlying_id (FK), as_of_timestamp, model_version
+  expiry, strike, option_type
+  spot, time_to_expiry, risk_free_rate, dividend_yield, reference_volatility
+  models_requested, models_available
+  reference_value          <- the median, bracketed below
+  reference_low, reference_high
+  dispersion_absolute, dispersion_relative, standard_deviation
+  market_price             <- an observation, never written from a model
+  market_deviation, market_deviation_relative
+  confidence, confidence_contributions
+  vanna, volga, charm_per_day
+  seed, paths, grid, warnings, provenance
+  CHECK((reference_value IS NULL) = (models_available = 0))
+  CHECK(reference_value IS NULL
+        OR reference_value BETWEEN reference_low AND reference_high)
+  CHECK(models_available <= models_requested)
+
+model_values
+  id (PK), consensus_id (FK)
+  model, model_version, value, method
+  inputs_used, diagnostics, warnings, unavailable_reason
+  UNIQUE(consensus_id, model)
+  CHECK((value IS NOT NULL AND unavailable_reason IS NULL)
+        OR (value IS NULL AND unavailable_reason IS NOT NULL))
+```
+
+Four of these constraints are the phase's rules made unenforceable-around:
+
+* `ck_converged_global_surface_is_arbitrage_free` — SSVI's entire claim over
+  per-expiry SVI is that an admissible fit is free of both arbitrages by
+  construction. A row calling itself `CONVERGED` while carrying a negative
+  density or a decreasing variance term structure would be that claim quietly
+  withdrawn.
+* `ck_model_value_has_value_or_reason` — a model that could not run is a row
+  with a reason, not a missing row. A consensus over three models because the
+  fourth failed and a consensus over three because only three were asked for are
+  different results, and only stored unavailability tells them apart.
+* `ck_consensus_reference_is_bracketed` — the median cannot float free of the
+  evidence it was drawn from.
+* `ck_density_quantiles_require_admissibility` — a quantile normalises by the
+  mass it found, so on a truncated or negative density it would be a plausible
+  number with no meaning.
+
+`global_surfaces` is a separate table from `volatility_surfaces` rather than a
+new `model` value on it. The two have different shapes and different guarantees,
+and overloading one table would have made the second guarantee invisible.
+`heston_calibrations` is separate for the same reason: SSVI and Heston are two
+descriptions of the same market fitted to the same quotes, and the point of the
+consensus is that they disagree — storing one inside the other's row would
+suggest a hierarchy the platform does not assert.
+
+### Planned tables (phases 10-11)
 
 | Table | Phase | Notes |
 | --- | --- | --- |
 | `market_bars` | 1 | hypertable, `(instrument_id, interval, exchange_timestamp)` — deferred with the bars endpoint |
-| `pricing_results` | 9 | one row per (contract, model, market_state) |
-| `risk_snapshots` | 5 | portfolio-level, timestamped |
-| `var_results` | 5 | method, confidence, horizon, lookback, n_obs |
-| `stress_scenarios`, `stress_results` | 5 | scenario definition reusable across portfolios |
-| `margin_results` | 6 | method, assumptions, estimate, confidence, warnings |
-| `orders`, `executions` | 7 | executions append-only, parent/child linkage |
-| `execution_reports` | 7 | TCA output per parent order |
-| `execution_simulations` | 8 | counterfactual runs, result in object store |
 
 ## 3. Indexing
 

@@ -6,6 +6,7 @@ import hashlib
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import PurePosixPath
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -290,6 +291,84 @@ class MarketDataService:
         if risk_free_rate is not None:
             builder.add_curve(YieldCurve.flat(risk_free_rate, moment, "INR", source="assumption"))
         return builder
+
+    async def underlying_price_history(
+        self,
+        user_id: uuid.UUID,
+        underlying_id: uuid.UUID,
+        limit: int = 500,
+    ) -> list[tuple[datetime, Decimal]]:
+        """The underlying's observed level, one point per ingested chain.
+
+        This is the platform's price history: it is exactly as long as the user's
+        own ingestion record, which is a real constraint and is reported as an
+        observation count wherever it is used rather than padded out.
+        """
+        rows = await self.repository.list_chain_snapshots(
+            user_id, underlying_id=underlying_id, limit=limit
+        )
+        return [
+            (row.as_of_timestamp, row.underlying_price)
+            for row in reversed(rows)
+            if row.underlying_price is not None
+        ]
+
+    async def instrument_quote_history(
+        self,
+        user_id: uuid.UUID,
+        instrument_id: uuid.UUID,
+        start: datetime,
+        end: datetime,
+        limit: int = 5_000,
+    ) -> list[tuple[datetime, Decimal, Decimal | None]]:
+        """Observed mids for one contract over a window, with their spreads.
+
+        Built from the option quotes stored with each ingested chain, which is
+        the platform's only intraday record of a contract. It carries a
+        two-sided market, so a spread travels with each observation and a spread
+        charge is attributable; it does *not* carry interval volume, and none is
+        invented here.
+        """
+        rows = await self.repository.option_quote_history(
+            user_id, instrument_id, start, end, limit=limit
+        )
+        history: list[tuple[datetime, Decimal, Decimal | None]] = []
+        for row in rows:
+            if row.bid_price is None or row.ask_price is None:
+                continue
+            if row.bid_price <= 0 or row.ask_price <= 0 or row.ask_price < row.bid_price:
+                continue
+            history.append(
+                (
+                    row.exchange_timestamp,
+                    (row.bid_price + row.ask_price) / 2,
+                    row.ask_price - row.bid_price,
+                )
+            )
+        return history
+
+    async def underlying_level_history(
+        self,
+        user_id: uuid.UUID,
+        underlying_id: uuid.UUID,
+        start: datetime,
+        end: datetime,
+        limit: int = 5_000,
+    ) -> list[tuple[datetime, Decimal, Decimal | None]]:
+        """The underlying's recorded level over a window.
+
+        One observation per ingested chain, and no spread: a snapshot's
+        underlying price is a single level, so nothing two-sided can be read off
+        it and no spread charge is attributable from it.
+        """
+        rows = await self.repository.list_chain_snapshots(
+            user_id, underlying_id=underlying_id, limit=limit
+        )
+        return [
+            (row.as_of_timestamp, row.underlying_price, None)
+            for row in reversed(rows)
+            if row.underlying_price is not None and start <= row.as_of_timestamp <= end
+        ]
 
     async def ingest_option_chain_bytes(
         self, data: bytes, request: OptionChainIngestionRequest

@@ -60,10 +60,14 @@ async def app_environment(tmp_path, session_tmp_root) -> AsyncIterator[dict]:
 
     # Importing the ORM modules is what registers them on Base.metadata.
     import domains.derivatives.orm  # noqa: F401
+    import domains.execution.orm  # noqa: F401
     import domains.instruments.orm  # noqa: F401
     import domains.jobs.orm  # noqa: F401
     import domains.market_data.orm  # noqa: F401
+    import domains.portfolio.orm  # noqa: F401
     import domains.reports.orm  # noqa: F401
+    import domains.risk.orm  # noqa: F401
+    import domains.scenarios.orm  # noqa: F401
     import domains.users.orm  # noqa: F401
     from infrastructure.database.session import get_engine
 

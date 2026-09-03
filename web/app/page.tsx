@@ -64,10 +64,15 @@ export default function Dashboard() {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Where the platform is</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          Phase 0 is complete: instrument master, market-data providers, the
-          data-quality engine, the option-chain ingestion pipeline, asynchronous
-          jobs and authentication. Implied volatility and everything downstream
-          of it begins in Phase 1, deliberately after this foundation is tested.
+          Phases 0 to 9 are complete: the instrument master and ingestion
+          pipeline, implied volatilities and forwards, SVI surface calibration,
+          the surface-deviation scanner, portfolio valuation with Greeks by
+          group, Value at Risk and scenario stress by full repricing, margin
+          estimation with an estimated-shortfall region, transaction cost
+          analysis on your own trade log, counterfactual execution simulation,
+          and the advanced derivatives stack — an arbitrage-free SSVI surface,
+          Dupire local volatility, Heston, and a model consensus that reports a
+          range rather than a price. Microstructure follows in Phase 10.
         </p>
         <ul className="reasons">
           <li>
@@ -77,6 +82,41 @@ export default function Dashboard() {
           <li>
             <Link href="/markets/chains">Browse chain snapshots</Link> — every
             quote with its quality scores, and every exclusion with its reason.
+          </li>
+          <li>
+            <Link href="/markets/surfaces">Calibrated surfaces</Link> — fitted
+            slices with their arbitrage checks and reference values.
+          </li>
+          <li>
+            <Link href="/markets/global-surfaces">Global surfaces</Link> — one
+            SSVI fit across every expiry, which cannot contain calendar
+            arbitrage, with the Dupire local-volatility grid and the implied
+            density derived from it.
+          </li>
+          <li>
+            <Link href="/markets/consensus">Model consensus</Link> — one
+            contract priced by four models, showing the range they span before
+            the median inside it.
+          </li>
+          <li>
+            <Link href="/portfolios">Portfolios</Link> — import positions, value
+            them against one snapshot, and read the Greeks by underlying,
+            expiry, asset class or strategy tag.
+          </li>
+          <li>
+            <Link href="/execution">Execution</Link> — import a trade log and
+            benchmark it. Every benchmark states its window, source and method,
+            and refuses rather than averaging a handful of ticks.
+          </li>
+          <li>
+            <Link href="/execution/simulate">Execution simulation</Link> — price
+            TWAP, VWAP, POV and liquidity-adaptive schedules against a past path.
+            Every number is a counterfactual estimate and says so.
+          </li>
+          <li>
+            <Link href="/scenarios">Scenarios</Link> — shipped hypotheticals, your
+            own, or one derived from an underlying&rsquo;s recorded history. Apply
+            one and the book is fully repriced, not extrapolated from its Greeks.
           </li>
         </ul>
       </div>

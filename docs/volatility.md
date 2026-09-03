@@ -1,10 +1,10 @@
 # Volatility — IV engine, smile, surface
 
-Status: **implemented** through Phase 3 — implied volatility, forward
+Status: **implemented** through Phase 9 — implied volatility, forward
 estimation, the raw smile, SVI calibration, the reference surface, the arbitrage
-validator, surface characteristics, historical percentiles and the anomaly
-scanner. SSVI and local volatility are Phase 9; PCA on surface changes is gated
-on real history. Formulas in
+validator, surface characteristics, historical percentiles, the anomaly scanner,
+the SSVI global surface, Dupire local volatility and the Breeden-Litzenberger
+implied density. PCA on surface changes is gated on real history. Formulas in
 `docs/methodology.md` sections 5-8; this document covers structure and data
 flow.
 
@@ -188,3 +188,136 @@ naming its measured value, which is what makes "why is confidence 0.42?"
 answerable from the response itself.
 
 
+
+
+## 7. The global surface — Phase 9 (implemented)
+
+### 7.1 Why a second surface rather than a replacement
+
+Per-expiry SVI fits five parameters to each smile independently. It reproduces
+any single smile better than three shared parameters can, and it has no
+structural reason for two neighbouring expiries to be consistent with each
+other, so calendar arbitrage is something it *detects*.
+
+SSVI (Gatheral & Jacquier 2014) fits
+
+```
+w(k, theta) = (theta / 2) * { 1 + rho phi(theta) k
+                              + sqrt[ (phi(theta) k + rho)^2 + (1 - rho^2) ] }
+```
+
+with three global parameters and one at-the-money total variance `theta` per
+expiry. Requiring `theta` to be non-decreasing in maturity **is** the
+no-calendar-arbitrage condition, so an admissible SSVI surface cannot contain
+the violation SVI could only name.
+
+Both are stored, in separate tables, and both are offered. Overloading one table
+with a `model` column would have hidden the fact that the two carry different
+guarantees. `ck_converged_global_surface_is_arbitrage_free` makes the SSVI
+guarantee a database rule: a row marked `CONVERGED` while carrying a decreasing
+term structure or a negative implied density cannot be stored.
+
+### 7.2 Calibration
+
+One SLSQP fit over `[rho, eta, gamma, theta_1 .. theta_n]`, deterministic
+multi-start, with three families of constraint in the feasible set rather than
+checked afterwards: monotone `theta`, the closed-form butterfly bounds of
+Theorem 4.2, and Durrleman's `g(k) >= 0` on a grid per slice.
+
+The closed-form bounds are **sufficient, not necessary**. A market with a very
+steep short-dated smile can be admissible — Durrleman non-negative everywhere —
+and still fail them. So both are evaluated and both are reported, and
+`enforce_butterfly_bounds` can be turned off to keep only the condition that
+actually decides the sign of the density. Trusting a sufficient condition alone
+would mean silently rejecting admissible surfaces and, worse, believing a proof
+rather than the surface in front of us.
+
+An inverted observed term structure — ATM variance that falls with maturity — is
+calendar arbitrage in the raw market. The fit imposes monotonicity, so the
+surface will not reproduce the inversion; a warning names it and the raw
+arbitrage report on the same analysis names the quotes responsible.
+
+### 7.3 The two ends of the term structure differ, on purpose
+
+Between the fitted expiries `theta` is interpolated with a monotone
+piecewise-cubic (PCHIP), so monotonicity holds everywhere and not only at the
+knots.
+
+**Before the first expiry** total variance is proportional to maturity, running
+down to `theta(0) = 0`. That is not extrapolation of a fitted slope: a
+zero-length period has zero variance, so the origin is a boundary condition, and
+a straight line to it is the flat-implied-volatility reading of the front slice.
+Clamping flat instead makes `dtheta/dT` zero across the whole front, and Dupire
+divides into that — the local volatility over the first month came back as pure
+fallback, and the PDE mispriced the surface it was derived from by 1.6%.
+
+**After the last expiry** it is flat, and that *is* a refusal to extrapolate:
+continuing a fitted slope past the last observed expiry invents a term
+structure, whereas a flat one cannot introduce calendar arbitrage. Local
+volatility past the end is consequently undefined and reported as such.
+
+Both ends are flagged `SSVI_EXTRAPOLATED_MATURITY` regardless.
+
+## 8. Local volatility — Phase 9 (implemented)
+
+Dupire in Gatheral's total-variance form, evaluated on the **fitted** surface
+with analytic first and second derivatives:
+
+```
+sigma_loc^2(k, T) = (dw/dT) / [ 1 - (k/w) dw/dk
+                                + (1/4)(-1/4 - 1/w + k^2/w^2)(dw/dk)^2
+                                + (1/2) d2w/dk2 ]
+```
+
+Analytic rather than bumped, because a finite-difference error in the second
+derivative turns into a local volatility that is wrong by an amount nothing
+downstream can detect.
+
+**The grid keeps its holes.** Where the denominator approaches zero the point
+has no value and carries the flag that says why; the same is true where
+`dw/dT` is negative or the magnitude is implausible. A grid that interpolated
+across those regions would look complete while being fiction exactly where it
+matters. `ck_local_vol_grid_conserves_points` enforces
+`total = valid + flagged`, the same conservation rule ingestion lives under.
+
+The PDE cannot have a hole in its coefficient, so `SurfaceLocalVol` substitutes
+the surface's own implied volatility there and **counts the substitutions**, and
+the count travels with the price so a value computed mostly from fallbacks is
+visible as one.
+
+One subtlety worth stating because getting it wrong is invisible: the surface is
+parameterised in `k = log(K / F_T)`, so evaluating it at calendar time `t`
+requires the forward **to t**, not the forward to the option's maturity. Holding
+one forward fixed across the time grid shifts every lookup along the smile by
+the carry — a systematic error in the wings that no amount of grid refinement
+removes. The forward curve used is `spot * exp(carry * t)` with `carry` fitted
+by least squares through the origin on the observed forwards, and it is stated
+as the deterministic-carry approximation it is.
+
+The validation for all of this is a round trip: a local-volatility surface
+derived from an implied surface must reprice that implied surface. It does, to
+under 0.2% across strikes, maturities and carries. It was 1.6-2.3% until the
+forward coordinate and the front of the term structure were fixed.
+
+## 9. Risk-neutral density — Phase 9 (implemented)
+
+Breeden-Litzenberger: the density is the second strike-derivative of the
+discounted call surface, taken on the **fit**, never on raw quotes — second
+differences of noise are exactly the failure the total-variance machinery exists
+to avoid.
+
+Every density is stored with what is wrong with it: negative regions, mass away
+from one, a mean away from the forward, a strike range too narrow to contain the
+distribution. **Quantiles are stored only for an admissible density**, meaning
+non-negative *and* normalised, and
+`ck_density_quantiles_require_admissibility` makes that a database rule. Both
+conditions matter: a negative region means the surface implies a distribution
+that cannot exist, and a mass away from one means the strike window does not
+contain the distribution, so a quantile — which normalises by whatever mass it
+found — would be a quantile of the *window*, and would look perfectly reasonable
+while being wrong.
+
+The payload states in its own `interpretation` field that this is the
+distribution the option market is pricing under and not a forecast of where the
+underlying will go. Those are different objects, and the difference is the whole
+content of the risk premium.

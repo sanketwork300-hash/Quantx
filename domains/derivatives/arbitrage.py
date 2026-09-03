@@ -469,8 +469,9 @@ class ArbitrageValidator:
                             "short_expiry": short_slice.expiry.isoformat(),
                             "long_expiry": long_slice.expiry.isoformat(),
                             "note": (
-                                "per-expiry SVI cannot prevent calendar arbitrage; "
-                                "it is detected and reported until SSVI (Phase 9)"
+                                "per-expiry SVI cannot prevent calendar arbitrage, "
+                                "only detect it; the SSVI global surface fitted "
+                                "from the same analysis cannot contain it"
                             ),
                         },
                     )

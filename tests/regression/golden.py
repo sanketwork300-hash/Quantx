@@ -45,10 +45,14 @@ async def _ingest(data: bytes, database_url: str) -> dict:
 
     # Importing the ORM modules registers them on Base.metadata.
     import domains.derivatives.orm  # noqa: F401
+    import domains.execution.orm  # noqa: F401
     import domains.instruments.orm  # noqa: F401
     import domains.jobs.orm  # noqa: F401
     import domains.market_data.orm  # noqa: F401
+    import domains.portfolio.orm  # noqa: F401
     import domains.reports.orm  # noqa: F401
+    import domains.risk.orm  # noqa: F401
+    import domains.scenarios.orm  # noqa: F401
     from domains.instruments.service import InstrumentService
     from domains.market_data.ingestion.column_mapping import ColumnMapping
     from domains.market_data.ingestion.pipeline import (

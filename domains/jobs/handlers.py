@@ -39,10 +39,18 @@ def get_handler(job_type: JobType) -> JobHandler:
 def _load_builtin_handlers() -> None:
     # Imported here rather than at module scope to keep the jobs domain free of
     # compile-time dependencies on the domains it executes work for.
+    from domains.derivatives.advanced_jobs import register_handlers as register_advanced
     from domains.derivatives.jobs import register_handlers as register_derivatives
     from domains.derivatives.surface_jobs import register_handlers as register_surface
+    from domains.execution.jobs import register_handlers as register_execution
     from domains.market_data.jobs import register_handlers as register_market_data
+    from domains.portfolio.jobs import register_handlers as register_portfolio
+    from domains.risk.jobs import register_handlers as register_risk
 
     register_market_data()
     register_derivatives()
     register_surface()
+    register_portfolio()
+    register_risk()
+    register_execution()
+    register_advanced()
