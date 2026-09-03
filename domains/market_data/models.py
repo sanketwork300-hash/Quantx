@@ -15,7 +15,12 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from domains.instruments.enums import OptionType
-from domains.market_data.enums import AggressorSide, BarInterval
+from domains.market_data.enums import (
+    AggressorSide,
+    BarInterval,
+    BookEventType,
+    BookSide,
+)
 
 SECONDS_PER_YEAR_ACT365 = Decimal(365 * 24 * 3600)
 
@@ -253,6 +258,53 @@ class OrderBookSnapshot:
         if total == 0:
             return None
         return float((bid_volume - ask_volume) / total)
+
+
+@dataclass(frozen=True, slots=True)
+class BookEvent:
+    """One order-book message.
+
+    The canonical form of an event-level feed, and the only input from which a
+    queue or an arrival-intensity model can be built. Note what is *not* here:
+    no queue position, no inferred aggressor, no reconstructed book state. Each
+    of those is a derivation, and derivations live beside the observation
+    rather than inside it.
+
+    ``sequence_number`` is nullable because plenty of exported tapes drop it,
+    and its absence is a fact the availability gate reads: without sequencing
+    there is no way to know whether the tape is complete, and a queue model
+    computed on a tape with a hole in it is a queue model of a different book.
+    """
+
+    instrument_id: uuid.UUID
+    exchange_timestamp: datetime
+    event_type: BookEventType
+    source: str
+    side: BookSide | None = None
+    price: Decimal | None = None
+    quantity: Decimal | None = None
+    sequence_number: int | None = None
+    order_id: str | None = None
+    receive_timestamp: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.exchange_timestamp.tzinfo is None:
+            raise ValueError("exchange_timestamp must be timezone-aware")
+        if self.quantity is not None and self.quantity < 0:
+            raise ValueError(
+                f"a negative event quantity is not a quantity: {self.quantity}; "
+                "a removal is carried by the event type, not by a sign"
+            )
+
+    @property
+    def is_departure(self) -> bool:
+        """Whether this event removed size from its price level.
+
+        A ``MODIFY`` is not counted: the feed does not say whether the size went
+        up or down, and guessing would put an invented departure into a queue
+        estimate.
+        """
+        return self.event_type in {BookEventType.CANCEL, BookEventType.TRADE}
 
 
 @dataclass(frozen=True, slots=True)
