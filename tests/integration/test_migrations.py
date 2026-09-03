@@ -39,6 +39,25 @@ EXPECTED_TABLES = {
     "surface_characteristics",
     "anomaly_scans",
     "surface_anomalies",
+    "portfolios",
+    "positions",
+    "portfolio_valuations",
+    "position_valuations",
+    "stress_scenarios",
+    "risk_snapshots",
+    "var_results",
+    "stress_results",
+    "margin_results",
+    "executions",
+    "execution_reports",
+    "execution_simulations",
+    "global_surfaces",
+    "global_surface_slices",
+    "local_volatility_surfaces",
+    "risk_neutral_densities",
+    "heston_calibrations",
+    "model_consensus_runs",
+    "model_values",
 }
 
 
@@ -107,10 +126,14 @@ class TestMigrations:
         # does the same, but importing it here would run the alembic script
         # outside an alembic context.)
         import domains.derivatives.orm  # noqa: F401
+        import domains.execution.orm  # noqa: F401
         import domains.instruments.orm  # noqa: F401
         import domains.jobs.orm  # noqa: F401
         import domains.market_data.orm  # noqa: F401
+        import domains.portfolio.orm  # noqa: F401
         import domains.reports.orm  # noqa: F401
+        import domains.risk.orm  # noqa: F401
+        import domains.scenarios.orm  # noqa: F401
         import domains.users.orm  # noqa: F401
         from infrastructure.database.base import Base
 

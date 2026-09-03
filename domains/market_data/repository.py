@@ -184,6 +184,39 @@ class MarketDataRepository:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def option_quote_history(
+        self,
+        user_id: uuid.UUID,
+        instrument_id: uuid.UUID,
+        start: datetime,
+        end: datetime,
+        limit: int = 5_000,
+    ) -> list[OptionQuoteORM]:
+        """Every stored quote for one contract in a window, oldest first.
+
+        Joined through the snapshot so ownership is enforced in the query rather
+        than filtered afterwards, and excluded quotes are left out: a quote the
+        ingestion pipeline set aside for a stated reason should not silently
+        become a benchmark observation.
+        """
+        stmt = (
+            select(OptionQuoteORM)
+            .join(
+                OptionChainSnapshotORM,
+                OptionChainSnapshotORM.id == OptionQuoteORM.chain_snapshot_id,
+            )
+            .where(
+                OptionChainSnapshotORM.user_id == user_id,
+                OptionQuoteORM.instrument_id == instrument_id,
+                OptionQuoteORM.excluded.is_(False),
+                OptionQuoteORM.exchange_timestamp >= start,
+                OptionQuoteORM.exchange_timestamp <= end,
+            )
+            .order_by(OptionQuoteORM.exchange_timestamp)
+            .limit(limit)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def count_option_quotes(self, snapshot_id: uuid.UUID) -> int:
         stmt = (
             select(func.count())

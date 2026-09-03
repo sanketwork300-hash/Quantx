@@ -10,7 +10,19 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.errors import register_exception_handlers
-from api.routes import auth, derivatives, health, instruments, jobs, market, uploads
+from api.routes import (
+    advanced,
+    auth,
+    derivatives,
+    execution,
+    health,
+    instruments,
+    jobs,
+    market,
+    portfolio,
+    risk,
+    uploads,
+)
 from infrastructure.database.session import dispose_engine
 from infrastructure.observability.logging import (
     configure_logging,
@@ -100,7 +112,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         instruments.router,
         market.router,
         derivatives.router,
+        advanced.router,
         uploads.router,
+        portfolio.router,
+        risk.router,
+        execution.router,
         jobs.router,
     ):
         app.include_router(router, prefix=API_PREFIX)

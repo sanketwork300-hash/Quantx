@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.derivatives.arbitrage import ArbitrageReport
+from domains.derivatives.global_surface import GlobalSurface
 from domains.derivatives.models import ChainAnalysis, ImpliedVolPoint, SmileSlice
 from domains.derivatives.orm import (
     AnomalyScanORM,
@@ -16,7 +17,14 @@ from domains.derivatives.orm import (
     ArbitrageViolationORM,
     ChainAnalysisORM,
     ForwardEstimateORM,
+    GlobalSurfaceORM,
+    GlobalSurfaceSliceORM,
+    HestonCalibrationORM,
     ImpliedVolORM,
+    LocalVolatilitySurfaceORM,
+    ModelConsensusORM,
+    ModelValueORM,
+    RiskNeutralDensityORM,
     SurfaceAnomalyORM,
     SurfaceCharacteristicORM,
     SurfaceParametersORM,
@@ -517,3 +525,217 @@ class DerivativesRepository:
         for instrument_id, difference in (await self._session.execute(stmt)).all():
             history.setdefault(instrument_id, []).append(float(difference))
         return history
+
+    # -------------------------------------------------------- global surfaces
+    async def create_global_surface(self, **kwargs) -> GlobalSurfaceORM:
+        row = GlobalSurfaceORM(**kwargs)
+        self._session.add(row)
+        await self._session.flush()
+        return row
+
+    async def add_global_surface_slices(
+        self, global_surface_row_id: uuid.UUID, surface: GlobalSurface
+    ) -> None:
+        for slice_ in surface.slices:
+            diagnostics = slice_.diagnostics
+            self._session.add(
+                GlobalSurfaceSliceORM(
+                    global_surface_id=global_surface_row_id,
+                    expiry=slice_.expiry,
+                    time_to_expiry=slice_.time_to_expiry,
+                    forward=slice_.forward,
+                    discount_factor=slice_.discount_factor,
+                    forward_method=slice_.forward_method,
+                    forward_confidence=slice_.forward_confidence,
+                    theta=slice_.theta,
+                    atm_volatility=(
+                        diagnostics.atm_volatility
+                        if diagnostics
+                        else (slice_.theta / slice_.time_to_expiry) ** 0.5
+                    ),
+                    n_observations=diagnostics.n_observations if diagnostics else 0,
+                    rmse_vol_points=diagnostics.rmse_vol_points if diagnostics else None,
+                    max_error_vol_points=(
+                        diagnostics.max_error_vol_points if diagnostics else None
+                    ),
+                    k_min=diagnostics.k_min if diagnostics else None,
+                    k_max=diagnostics.k_max if diagnostics else None,
+                    butterfly_first=diagnostics.butterfly_first if diagnostics else None,
+                    butterfly_second=diagnostics.butterfly_second if diagnostics else None,
+                    butterfly_bounds_satisfied=(
+                        diagnostics.butterfly_bounds_satisfied if diagnostics else False
+                    ),
+                    min_durrleman_g=diagnostics.min_durrleman_g if diagnostics else None,
+                )
+            )
+        await self._session.flush()
+
+    async def get_global_surface(
+        self, row_id: uuid.UUID, user_id: uuid.UUID | None = None
+    ) -> GlobalSurfaceORM | None:
+        row = await self._session.get(GlobalSurfaceORM, row_id)
+        if row is None:
+            return None
+        if user_id is not None and row.user_id != user_id:
+            return None
+        return row
+
+    async def latest_global_surface(
+        self, user_id: uuid.UUID, underlying_id: uuid.UUID
+    ) -> GlobalSurfaceORM | None:
+        stmt = (
+            select(GlobalSurfaceORM)
+            .where(
+                GlobalSurfaceORM.user_id == user_id,
+                GlobalSurfaceORM.underlying_id == underlying_id,
+            )
+            .order_by(GlobalSurfaceORM.as_of_timestamp.desc(), GlobalSurfaceORM.created_at.desc())
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def list_global_surfaces(
+        self, user_id: uuid.UUID, limit: int = 50, offset: int = 0
+    ) -> list[GlobalSurfaceORM]:
+        stmt = (
+            select(GlobalSurfaceORM)
+            .where(GlobalSurfaceORM.user_id == user_id)
+            .order_by(GlobalSurfaceORM.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def get_global_surface_slices(
+        self, global_surface_row_id: uuid.UUID
+    ) -> list[GlobalSurfaceSliceORM]:
+        stmt = (
+            select(GlobalSurfaceSliceORM)
+            .where(GlobalSurfaceSliceORM.global_surface_id == global_surface_row_id)
+            .order_by(GlobalSurfaceSliceORM.time_to_expiry)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    # ------------------------------------------------------ local volatility
+    async def add_local_volatility_surface(self, **kwargs) -> LocalVolatilitySurfaceORM:
+        row = LocalVolatilitySurfaceORM(**kwargs)
+        self._session.add(row)
+        await self._session.flush()
+        return row
+
+    async def get_local_volatility_surface(
+        self, global_surface_row_id: uuid.UUID
+    ) -> LocalVolatilitySurfaceORM | None:
+        stmt = (
+            select(LocalVolatilitySurfaceORM)
+            .where(LocalVolatilitySurfaceORM.global_surface_id == global_surface_row_id)
+            .order_by(LocalVolatilitySurfaceORM.created_at.desc())
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    # --------------------------------------------------------------- density
+    async def add_density(self, **kwargs) -> RiskNeutralDensityORM:
+        row = RiskNeutralDensityORM(**kwargs)
+        self._session.add(row)
+        await self._session.flush()
+        return row
+
+    async def get_densities(self, global_surface_row_id: uuid.UUID) -> list[RiskNeutralDensityORM]:
+        stmt = (
+            select(RiskNeutralDensityORM)
+            .where(RiskNeutralDensityORM.global_surface_id == global_surface_row_id)
+            .order_by(RiskNeutralDensityORM.expiry)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    # ------------------------------------------------------------- consensus
+    async def create_consensus(self, **kwargs) -> ModelConsensusORM:
+        row = ModelConsensusORM(**kwargs)
+        self._session.add(row)
+        await self._session.flush()
+        return row
+
+    async def add_model_values(self, consensus_row_id: uuid.UUID, values: Sequence) -> None:
+        for value in values:
+            self._session.add(
+                ModelValueORM(
+                    consensus_id=consensus_row_id,
+                    model=str(value.model),
+                    model_version=value.model_version,
+                    value=value.value,
+                    method=value.method[:128],
+                    inputs_used=dict(value.inputs_used),
+                    diagnostics=dict(value.diagnostics),
+                    warnings=list(value.warnings),
+                    unavailable_reason=(
+                        value.unavailable_reason[:512] if value.unavailable_reason else None
+                    ),
+                )
+            )
+        await self._session.flush()
+
+    async def get_consensus(
+        self, row_id: uuid.UUID, user_id: uuid.UUID | None = None
+    ) -> ModelConsensusORM | None:
+        row = await self._session.get(ModelConsensusORM, row_id)
+        if row is None:
+            return None
+        if user_id is not None and row.user_id != user_id:
+            return None
+        return row
+
+    async def get_model_values(self, consensus_row_id: uuid.UUID) -> list[ModelValueORM]:
+        stmt = (
+            select(ModelValueORM)
+            .where(ModelValueORM.consensus_id == consensus_row_id)
+            .order_by(ModelValueORM.model)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_consensus_runs(
+        self, user_id: uuid.UUID, limit: int = 50, offset: int = 0
+    ) -> list[ModelConsensusORM]:
+        stmt = (
+            select(ModelConsensusORM)
+            .where(ModelConsensusORM.user_id == user_id)
+            .order_by(ModelConsensusORM.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    # ----------------------------------------------------------- heston fits
+    async def add_heston_calibration(self, **kwargs) -> HestonCalibrationORM:
+        row = HestonCalibrationORM(**kwargs)
+        self._session.add(row)
+        await self._session.flush()
+        return row
+
+    async def latest_heston_calibration(
+        self, user_id: uuid.UUID, underlying_id: uuid.UUID
+    ) -> HestonCalibrationORM | None:
+        stmt = (
+            select(HestonCalibrationORM)
+            .where(
+                HestonCalibrationORM.user_id == user_id,
+                HestonCalibrationORM.underlying_id == underlying_id,
+                HestonCalibrationORM.v0.is_not(None),
+            )
+            .order_by(
+                HestonCalibrationORM.as_of_timestamp.desc(),
+                HestonCalibrationORM.created_at.desc(),
+            )
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def get_heston_calibration(
+        self, row_id: uuid.UUID, user_id: uuid.UUID | None = None
+    ) -> HestonCalibrationORM | None:
+        row = await self._session.get(HestonCalibrationORM, row_id)
+        if row is None:
+            return None
+        if user_id is not None and row.user_id != user_id:
+            return None
+        return row

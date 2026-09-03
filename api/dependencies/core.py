@@ -10,10 +10,21 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.errors import Unauthorized
+from domains.derivatives.advanced import AdvancedDerivativesService
 from domains.derivatives.application import DerivativesService
+from domains.execution.application import ExecutionApplicationService
 from domains.instruments.service import InstrumentService
 from domains.jobs.service import JobService
 from domains.market_data.service import MarketDataService
+from domains.portfolio.application import PortfolioApplicationService
+from domains.portfolio.service import PortfolioService
+from domains.reports.composition import (
+    ExecutionWindowComposer,
+    FactorHistoryComposer,
+    ValuationContextComposer,
+)
+from domains.risk.application import RiskApplicationService
+from domains.scenarios.service import ScenarioService
 from domains.users.models import User
 from domains.users.service import UserService
 from infrastructure.cache.client import Cache, get_cache
@@ -111,8 +122,72 @@ def derivatives_service(session: SessionDep, settings: SettingsDep) -> Derivativ
     return DerivativesService(session, settings)
 
 
+def advanced_derivatives_service(
+    session: SessionDep, settings: SettingsDep
+) -> AdvancedDerivativesService:
+    return AdvancedDerivativesService(session, settings)
+
+
+def portfolio_service(session: SessionDep) -> PortfolioService:
+    return PortfolioService(session)
+
+
+def portfolio_application(
+    session: SessionDep, settings: SettingsDep
+) -> PortfolioApplicationService:
+    return PortfolioApplicationService(session, settings)
+
+
+def execution_service(session: SessionDep, settings: SettingsDep) -> ExecutionApplicationService:
+    return ExecutionApplicationService(session, settings)
+
+
+def execution_window_composer(
+    session: SessionDep, settings: SettingsDep, store: ObjectStoreDep
+) -> ExecutionWindowComposer:
+    """Market observations for a benchmark window, from market data alone."""
+    return ExecutionWindowComposer(MarketDataService(session, settings, store))
+
+
+def risk_service(session: SessionDep, settings: SettingsDep) -> RiskApplicationService:
+    return RiskApplicationService(session, settings)
+
+
+def scenario_service(session: SessionDep) -> ScenarioService:
+    return ScenarioService(session)
+
+
+def factor_history_composer(
+    session: SessionDep, settings: SettingsDep, store: ObjectStoreDep
+) -> FactorHistoryComposer:
+    """The other cross-engine fan-out: price history plus volatility history."""
+    return FactorHistoryComposer(
+        MarketDataService(session, settings, store), DerivativesService(session, settings)
+    )
+
+
+def valuation_composer(
+    session: SessionDep, settings: SettingsDep, store: ObjectStoreDep
+) -> ValuationContextComposer:
+    """The one cross-engine fan-out: market data plus derivatives surfaces."""
+    return ValuationContextComposer(
+        MarketDataService(session, settings, store), DerivativesService(session, settings)
+    )
+
+
 UserServiceDep = Annotated[UserService, Depends(user_service)]
 DerivativesServiceDep = Annotated[DerivativesService, Depends(derivatives_service)]
+AdvancedDerivativesDep = Annotated[
+    AdvancedDerivativesService, Depends(advanced_derivatives_service)
+]
 InstrumentServiceDep = Annotated[InstrumentService, Depends(instrument_service)]
 JobServiceDep = Annotated[JobService, Depends(job_service)]
 MarketDataServiceDep = Annotated[MarketDataService, Depends(market_data_service)]
+PortfolioServiceDep = Annotated[PortfolioService, Depends(portfolio_service)]
+PortfolioApplicationDep = Annotated[PortfolioApplicationService, Depends(portfolio_application)]
+ValuationComposerDep = Annotated[ValuationContextComposer, Depends(valuation_composer)]
+RiskServiceDep = Annotated[RiskApplicationService, Depends(risk_service)]
+ExecutionServiceDep = Annotated[ExecutionApplicationService, Depends(execution_service)]
+ExecutionWindowComposerDep = Annotated[ExecutionWindowComposer, Depends(execution_window_composer)]
+ScenarioServiceDep = Annotated[ScenarioService, Depends(scenario_service)]
+FactorHistoryComposerDep = Annotated[FactorHistoryComposer, Depends(factor_history_composer)]

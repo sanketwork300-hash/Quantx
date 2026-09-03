@@ -28,6 +28,14 @@ export default function RootLayout({
                 <Link href="/markets/chains">Option chains</Link>
                 <Link href="/markets/analyses">Volatility analyses</Link>
                 <Link href="/markets/surfaces">Surfaces</Link>
+                <Link href="/markets/global-surfaces">Global surfaces</Link>
+                <Link href="/markets/consensus">Model consensus</Link>
+                <div className="group">Portfolio</div>
+                <Link href="/portfolios">Portfolios</Link>
+                <Link href="/scenarios">Scenarios</Link>
+                <div className="group">Execution</div>
+                <Link href="/execution">Trade analysis</Link>
+                <Link href="/execution/simulate">Simulation</Link>
                 <div className="group">Data</div>
                 <Link href="/data">Imports</Link>
                 <div className="group">Account</div>

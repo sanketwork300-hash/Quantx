@@ -48,9 +48,9 @@ produced it, the assumptions that were made, and what the platform could not do.
 
 ---
 
-## Status: Phases 0 through 3 complete
+## Status: Phases 0 through 8 complete
 
-Eight phases remain (4 through 11); `docs/backlog.md` has the plan and the
+Three phases remain (9 through 11); `docs/backlog.md` has the plan and the
 acceptance criteria each must meet.
 
 **Phase 0 — foundation.**
@@ -96,10 +96,85 @@ direction, a rating or a target, and a test asserts the words *buy*, *sell*,
 *cheap*, *expensive*, *underpriced* and *arbitrage* appear nowhere in the
 response.
 
-**Not shipped, on purpose:** SSVI, local volatility, PCA on surface changes
-(gated on real history), portfolio, risk, margin and TCA.
+**Phase 4 — portfolio.**
+Portfolios and positions with a signed quantity whose sign and stated side must
+agree. Position import that resolves every row against the instrument master
+into `resolved / ambiguous / invalid` and **refuses to commit while any row is
+ambiguous** — picking the most likely contract is how a book silently acquires
+the wrong expiry. Valuation against one `MarketState` covering every underlying,
+with the observed price and the surface's reference price in separate columns
+and a `valuation_method` naming which one was used. Greeks scaled once, by
+signed quantity times multiplier times the FX rate from that same snapshot, and
+aggregated by underlying, expiry, asset class, strategy tag and currency — every
+dimension summing to the same portfolio total.
 
-1,740 tests: unit, integration, quantitative validation, golden-file regression,
+**Phase 5 — risk.**
+Value at Risk and Expected Shortfall by three methods, two of which **fully
+reprice** the book under every scenario rather than scaling today's Greeks — and
+the third of which says in its own response that it did not. A scenario engine
+with four shock types, where applying a scenario reprices every position from
+anchors chosen so that a *null* scenario returns exactly zero. The second-order
+Greek estimate of the same move is returned beside the answer and labelled as an
+approximation; on a short-gamma book the two differ by over 5% on a 10% move and
+by under 1% on a 0.1% move. Loss decomposition by underlying, expiry, asset
+class and strategy tag, validated against the costlier hold-one-group-flat
+construction. No shipped scenario is named after a real market event.
+
+**Phase 6 — margin.**
+A named, versioned margin model — the worst loss the book takes across a
+**declared** shock grid, because a margin figure is the worst loss over the
+moves someone chose to look at and a reader who cannot see those moves cannot
+judge the figure. Utilisation and a buffer ladder that reruns the model at every
+rung, in both directions, because a short-call book is short the upside. The
+output where it matters is a **region**, interpolated between the two rungs that
+bracket it and reported with them, never a liquidation price.
+
+**Phase 7 — execution.**
+Transaction cost analysis on your own trade log. Six benchmarks, each of which
+reports the window it covered, where its observations came from and how they
+were combined — and each of which can answer *"the data you hold cannot support
+this, and here is why"* instead of a price. Implementation shortfall in
+currency, basis points and percent, with the side convention applied in exactly
+one place so a buy above the benchmark and a sell below it read the same way. A
+cost decomposition where only fees are labelled `MEASURED`, market impact is
+labelled `NOT_MODELLED`, and the residual says in words what it is carrying.
+
+**Phase 8 — execution simulation.**
+TWAP, VWAP, POV and liquidity-adaptive schedules whose slices sum to the parent
+quantity *exactly*, priced against a path the market already printed under a
+named impact model. **No impact coefficient ships calibrated**: the default is
+the identity, which makes the output the shape of the model rather than a
+magnitude, and every result computed that way says so. Every simulated number is
+labelled a counterfactual estimate — on the object, in the payload, first in the
+warnings, and by a database CHECK that makes an unlabelled row unstorable.
+
+**Phase 9 — advanced derivatives.**
+An SSVI global surface whose at-the-money variance term structure is
+non-decreasing by construction, which for SSVI *is* the no-calendar-arbitrage
+condition — so an admissible fit cannot contain the violation the per-expiry SVI
+surface could only report, and a database CHECK refuses to store a converged row
+that does. Dupire local volatility taken analytically on that surface, with the
+regions where the denominator vanishes kept as **holes carrying their reasons**
+rather than interpolated over; the round trip that says it works is that the
+resulting PDE reprices the surface it came from, to under 0.2%. A
+Crank-Nicolson solver validated on its **order of convergence**, not its error —
+which is what caught gamma converging at first order while the price looked
+fine. Heston from the characteristic function, cross-checked against QuantLib to
+1.5e-11 across maturities from a week to ten years, with Feller reported and only
+optionally enforced because real surfaces violate it. And a model consensus that
+returns a median, the range the models actually spanned, and their dispersion —
+with **no `best_model` field and no field that could hold one**, because
+choosing between sets of wrong assumptions is a judgement the platform is not in
+a position to make.
+
+**Not shipped, on purpose:** American exercise, jump-diffusion and rough
+volatility, PCA on surface changes (gated on real history), Almgren-Chriss, and
+any calibrated impact coefficient. Also not shipped: any margin model claiming
+to be a broker's or an exchange's, any short-option or concentration rate —
+those are venue rules, and the platform does not have them — and any reading of
+the implied density as a forecast of where the underlying will go.
+
+2,392 tests: unit, integration, quantitative validation, golden-file regression,
 plus opt-in benchmarks.
 
 ---
@@ -134,7 +209,43 @@ the floor; inverting that price is numerically flawless and returns 50% against
 a true 12%. A dozen such quotes moved a fitted slice by 104 volatility points
 until the platform learned to say "this price pins down nothing" and drop them.
 
-**5. A deviation from a model is a statement about the model.**
+**5. A refusal is an answer.**
+Historical VaR needs a factor history, and the only history this platform has is
+the user's own ingestion record. Below ten aligned observations it returns
+`FAILED` with the observation count rather than a number computed from four
+points. Nothing is forward-filled across a gap either: a carried-forward price
+is a zero return the market never had, and zero returns pull every volatility
+estimate — and every VaR built on one — downward.
+
+**6. The hardest number to produce honestly is margin, so it is the one most
+hedged.** The platform does not know your broker's margin — exchange
+methodologies are proprietary and change without notice — so it ships a model of
+its own, names it, versions it, declares the grid it measured over, and reports
+a shortfall *region* rather than a liquidation price. The short-option minimum
+and concentration rates default to zero, because picking a plausible 2% would
+manufacture exactly the kind of number this project exists not to produce. A
+test permits the word "liquidation" in the output only when it is immediately
+preceded by "not a broker".
+
+**7. "Unavailable" is a first-class result, not an error.**
+A benchmark function that can only return a price has no room for the answer
+this platform most often has to give. So every benchmark returns either a price
+with its window, source and method, or an explicit unavailability with a reason
+— and the consequence propagates: no price means no shortfall rather than a
+zero, the analysis lists what it could not compute beside what it could, and a
+database CHECK refuses to store a shortfall without the benchmark it was
+measured against. "No benchmark was available" and "the cost was zero" must
+never render the same way.
+
+**8. A number that never happened must be unable to lose its label.**
+A simulated average price and a real one look identical in a table, and the
+moment one is copied into a report without its label it becomes a claim about
+what happened. So the counterfactual label sits on the result object, in the
+serialised payload's own caveat, first in the envelope's warnings, and in a
+`CHECK` constraint that makes an unlabelled row unstorable — not by a refactor,
+not by a bulk insert, not by hand.
+
+**9. A deviation from a model is a statement about the model.**
 The anomaly scanner produces a measured difference, the scale of everything that
 could account for it, and a confidence grounded in named measurements. It
 produces no direction, no rating and no target — there is no such field in the
@@ -190,6 +301,30 @@ settlement, and put-call parity will recover both from the quotes alone — then
 the scanner should find nothing, which is the point; edit one quote in the CSV
 and it will find that.
 
+Then create a portfolio at <http://localhost:3000/portfolios> and import
+`tests/data/portfolio_options.csv` into it. Seven of its ten rows resolve
+against the contracts you just ingested; the other three are shown with the
+reason each was kept out. Value it and the dashboard will tell you which legs
+were marked to market and which to the fitted surface. From there, **Risk and
+stress** applies a scenario and fully reprices the book — compare the answer
+with the Greek approximation shown beside it, then widen the shock and watch
+them come apart. **Margin** estimates the requirement over a declared shock grid
+and draws the buffer curve; give it some capital and it will tell you roughly
+how far the market can move before the estimated buffer goes negative, and
+refuse to tell you where you would be liquidated.
+
+Finally, upload `tests/data/trades.csv` at <http://localhost:3000/execution>.
+Eight of its twelve rows become four parent orders — two the file names, two the
+platform has to infer and flags as inferred — and the other four are shown with
+the reason each was kept out. Analyse them and most interval benchmarks will
+report themselves unavailable, because one ingested chain is one observation;
+that is the honest answer, and each one says so in its own words.
+
+From there, **Simulation** prices TWAP and VWAP schedules against the same path.
+Ask for a VWAP without giving it a volume profile and it will refuse rather than
+hand you a TWAP under the wrong name — which is the only thing that makes the
+comparison between the two mean anything.
+
 ---
 
 ## Common commands
@@ -210,9 +345,10 @@ make check             # everything CI runs
 ```
 apps/            process entrypoints (api, worker, scheduler) — wiring only
 api/             HTTP: routing, schemas, authz. No financial mathematics.
-domains/         instruments, market_data, derivatives, jobs, users, reports
-quant/           pure numerics: pricing, volatility, statistics, numerical,
-                 interpolation, daycount
+domains/         instruments, market_data, derivatives, portfolio, risk,
+                 scenarios, execution, jobs, users, reports
+quant/           pure numerics: pricing, volatility, statistics, simulation,
+                 numerical, interpolation, daycount
 infrastructure/  database, cache, queue, storage, observability, security
 web/             Next.js frontend
 tests/           unit, integration, quant_validation, regression, performance

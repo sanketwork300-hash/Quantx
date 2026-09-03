@@ -426,3 +426,967 @@ export interface SurfaceHistory {
   underlying_id: string;
   tenors: TenorHistory[];
 }
+
+// ---------------------------------------------------------------- portfolio
+export interface Portfolio {
+  id: string;
+  name: string;
+  base_currency: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Position {
+  id: string;
+  portfolio_id: string;
+  instrument_id: string;
+  quantity: string;
+  side: string;
+  average_price: string | null;
+  source: string;
+  strategy_tag: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface ResolvedImportRow {
+  row_number: number;
+  instrument_id: string;
+  canonical_key: string;
+  symbol: string;
+  asset_class: string;
+  expiry: string | null;
+  strike: string | null;
+  option_type: string | null;
+  quantity: string;
+  side: string;
+  average_price: string | null;
+  strategy_tag: string | null;
+  multiplier: string;
+  currency: string;
+  resolution_method: string;
+  creates_instrument: boolean;
+  creates_underlying: string | null;
+  multiplier_is_assumed: boolean;
+}
+
+export interface AmbiguousImportRow {
+  row_number: number;
+  reason: string;
+  candidates: {
+    instrument_id: string;
+    canonical_key: string;
+    symbol: string;
+    expiry: string | null;
+    strike: string | null;
+    option_type: string | null;
+  }[];
+  raw: Record<string, string>;
+}
+
+export interface InvalidImportRow {
+  row_number: number;
+  reason: string;
+  message: string;
+}
+
+export interface ImportPreview {
+  upload_id: string;
+  headers: string[];
+  inferred_mapping: Record<string, string>;
+  applied_mapping: Record<string, string>;
+  rows_in: number;
+  committable: boolean;
+  resolved: ResolvedImportRow[];
+  ambiguous: AmbiguousImportRow[];
+  invalid: InvalidImportRow[];
+}
+
+export interface PortfolioGreeks {
+  delta: number;
+  gamma: number;
+  vega_per_vol_point: number;
+  theta_per_day: number;
+  rho_per_bp: number;
+  units: Record<string, string>;
+}
+
+export interface AggregateBucket {
+  dimension: string;
+  key: string;
+  label: string;
+  positions: number;
+  valued: number;
+  base_market_value: string;
+  gross_exposure: string;
+  net_exposure: string;
+  unrealized_pnl: string;
+  greeks: PortfolioGreeks;
+}
+
+export interface PortfolioValuation {
+  valuation_id: string;
+  portfolio_id: string;
+  as_of_timestamp: string;
+  base_currency: string;
+  market_state_id: string | null;
+  positions: number;
+  valued: number;
+  base_market_value: string;
+  unrealized_pnl: string;
+  gross_exposure: string;
+  net_exposure: string;
+  greeks: PortfolioGreeks;
+  valuation_methods: Record<string, number>;
+  aggregates: AggregateBucket[];
+  created_at: string;
+}
+
+export interface PositionValuationDetail {
+  position_id: string;
+  instrument_id: string;
+  canonical_key: string;
+  asset_class: string;
+  expiry: string | null;
+  strike: string | null;
+  option_type: string | null;
+  quantity: string;
+  multiplier: string;
+  currency: string;
+  /** Observed. Never written from the model. */
+  market_price: string | null;
+  /** Estimated from the fitted surface. Never written from the market. */
+  model_price: string | null;
+  price_used: string | null;
+  valuation_method: string;
+  market_value: string | null;
+  base_market_value: string | null;
+  fx_rate: string | null;
+  unrealized_pnl: string | null;
+  greeks: PortfolioGreeks;
+  greek_source: string;
+  implied_volatility: number | null;
+  time_to_expiry: number | null;
+  quote_age_seconds: number | null;
+  warnings: string[];
+}
+
+export interface ValuationDetail extends PortfolioValuation {
+  positions_detail: PositionValuationDetail[];
+}
+
+// --------------------------------------------------------------------- risk
+export type ShockType =
+  | "ABSOLUTE"
+  | "PERCENTAGE"
+  | "VOL_POINTS"
+  | "BASIS_POINTS";
+
+export type RiskFactorKind =
+  | "UNDERLYING_PRICE"
+  | "VOLATILITY"
+  | "RISK_FREE_RATE"
+  | "DIVIDEND_YIELD"
+  | "FX_RATE";
+
+export interface Shock {
+  kind: RiskFactorKind;
+  shock_type: ShockType;
+  value: number;
+  target: string | null;
+  label: string;
+}
+
+export interface HistoricalDerivation {
+  series: string;
+  observations: number;
+  start_date: string;
+  end_date: string;
+  event_date: string;
+  window_days: number;
+  method: string;
+}
+
+export interface Scenario {
+  id: string;
+  name: string;
+  description: string | null;
+  /** HYPOTHETICAL templates make no claim about any market's past. */
+  source: "HYPOTHETICAL" | "DERIVED_FROM_HISTORY" | "USER_DEFINED";
+  shocks: Shock[];
+  derivation: HistoricalDerivation | null;
+  created_at: string | null;
+}
+
+export interface TailRisk {
+  confidence: number;
+  value_at_risk: number;
+  expected_shortfall: number;
+  observations: number;
+  tail_observations: number;
+  quantile_method: string;
+  mean_loss: number;
+  worst_loss: number;
+  is_reliable: boolean;
+  warnings: string[];
+  interpretation: { value_at_risk: string; expected_shortfall: string };
+}
+
+export interface FactorPanelSummary {
+  policy: string;
+  window_days: number;
+  observations: number;
+  aligned_levels: number;
+  date_range: [string, string] | null;
+  factors: {
+    name: string;
+    kind: string;
+    target: string;
+    source: string;
+    observations: number;
+    start_date: string | null;
+    end_date: string | null;
+  }[];
+  missing_data_policy: string;
+  warnings: string[];
+}
+
+export interface VaRResult {
+  var_id: string;
+  method: string;
+  horizon_days: number;
+  base_value: number;
+  scenarios: number;
+  tail_risk: TailRisk[];
+  estimate_intervals: Record<
+    string,
+    { low: number; high: number; interval: number }
+  >;
+  assumptions: Record<string, unknown>;
+  factor_panel: FactorPanelSummary;
+  worst_scenario_dates: string[];
+  warnings: string[];
+}
+
+export interface RiskContribution {
+  dimension: string;
+  key: string;
+  positions: number;
+  base_value: number;
+  contribution: number;
+  share: number | null;
+}
+
+export interface ContributionBreakdown {
+  dimension: string;
+  total_pnl: number;
+  residual: number;
+  residual_note: string;
+  ungrouped_positions: number;
+  ungrouped_pnl: number;
+  contributions: RiskContribution[];
+}
+
+export interface StressPosition {
+  position_id: string;
+  canonical_key: string;
+  underlying_id: string;
+  strategy_tag: string | null;
+  expiry: string | null;
+  asset_class: string;
+  base_value: number;
+  shocked_value: number;
+  pnl: number;
+  shocked_spot: number;
+  shocked_volatility: number | null;
+  volatility_was_floored: boolean;
+}
+
+export interface StressResult {
+  stress_id: string;
+  scenario: { id: string; name: string; source: string };
+  base_value: number;
+  shocked_value: number;
+  /** The full repricing. This is the answer. */
+  pnl: number;
+  greek_approximation: {
+    /** A second-order estimate, kept beside the answer, never in place of it. */
+    pnl: number;
+    difference_from_full_revaluation: number;
+    method: string;
+    caveat: string;
+  };
+  time_decay_days: number;
+  floored_volatilities: number;
+  shocks: Record<string, Record<string, number>>;
+  positions: StressPosition[];
+  contributions: ContributionBreakdown[];
+  excluded_positions: number;
+  excluded_reported_value: number;
+}
+
+export interface VaRSummary {
+  id: string;
+  portfolio_id: string;
+  snapshot_id: string;
+  method: string;
+  horizon_days: number;
+  scenarios: number;
+  base_value: number;
+  seed: number | null;
+  tail_risk: TailRisk[];
+  warnings: string[];
+  created_at: string;
+}
+
+export interface StressSummary {
+  id: string;
+  portfolio_id: string;
+  snapshot_id: string;
+  scenario_name: string;
+  scenario_source: string;
+  base_value: number;
+  shocked_value: number;
+  pnl: number;
+  greek_estimate: number;
+  time_decay_days: number;
+  created_at: string;
+}
+
+// ------------------------------------------------------------------- margin
+export interface MarginComponent {
+  name: string;
+  amount: number;
+  /** What the component is, in a sentence a reader can argue with. */
+  basis: string;
+}
+
+export interface MarginModelInfo {
+  name: string;
+  version: string;
+  description: string;
+  /** False for every model here, and only ever true for a published methodology. */
+  is_broker_equivalent: boolean;
+}
+
+export interface LadderPoint {
+  spot_return: number;
+  vol_points: number;
+  portfolio_value: number;
+  pnl: number;
+  available_capital: number | null;
+  estimated_margin: number;
+  margin_confidence: number;
+  buffer: number | null;
+  utilisation: number | null;
+  in_shortfall: boolean;
+}
+
+export interface ShortfallRegion {
+  direction: "DOWNSIDE" | "UPSIDE";
+  approximate_entry: number;
+  bracketed_by: [number, number];
+  buffer_before: number;
+  buffer_after: number;
+}
+
+export interface MarginEstimate {
+  method: string;
+  model_version: string;
+  estimated_margin: number;
+  currency: string;
+  components: MarginComponent[];
+  assumptions: string[];
+  confidence: number;
+  parameters: {
+    grid: { spot_returns: number[]; vol_points: number[]; points: number };
+    short_option_minimum_rate: number;
+    concentration_add_on_rate: number;
+    concentration_threshold: number;
+  };
+  worst_case: {
+    spot_return: number;
+    vol_points: number;
+    loss: number;
+    at_grid_edge: boolean;
+  };
+  positions: number;
+  excluded_positions: number;
+  warnings: string[];
+  disclaimer: string;
+}
+
+export interface MarginResult {
+  margin_id: string;
+  method: string;
+  currency: string;
+  eligible_capital: number | null;
+  vol_co_shock: number;
+  estimated_margin: number;
+  margin: MarginEstimate;
+  buffer: number | null;
+  utilisation: number | null;
+  in_shortfall_at_rest: boolean;
+  shortfall_region: {
+    downside: ShortfallRegion | null;
+    upside: ShortfallRegion | null;
+  };
+  summary: string;
+  assumptions: string[];
+  warnings: string[];
+  ladder: LadderPoint[];
+}
+
+export interface MarginSummary {
+  id: string;
+  portfolio_id: string;
+  snapshot_id: string;
+  method: string;
+  model_version: string;
+  currency: string;
+  estimated_margin: number;
+  confidence: number;
+  eligible_capital: number | null;
+  buffer: number | null;
+  utilisation: number | null;
+  in_shortfall_at_rest: boolean;
+  vol_co_shock: number;
+  worst_spot_return: number;
+  worst_vol_points: number;
+  worst_loss: number;
+  worst_at_grid_edge: boolean;
+  positions: number;
+  excluded_positions: number;
+  summary: string;
+  warnings: string[];
+  created_at: string;
+}
+
+// -------------------------------------------------------------- execution
+export interface ResolvedTradeRow {
+  row_number: number;
+  instrument_id: string;
+  canonical_key: string;
+  symbol: string;
+  asset_class: string;
+  expiry: string | null;
+  strike: string | null;
+  option_type: string | null;
+  side: string;
+  quantity: string;
+  price: string;
+  timestamp: string;
+  parent_order_key: string | null;
+  fees: string;
+  resolution_method: string;
+  creates_instrument: boolean;
+  creates_underlying: string | null;
+  multiplier_is_assumed: boolean;
+}
+
+export interface TradeImportPreview {
+  upload_id: string;
+  headers: string[];
+  inferred_mapping: Record<string, string>;
+  applied_mapping: Record<string, string>;
+  rows_in: number;
+  committable: boolean;
+  resolved: ResolvedTradeRow[];
+  ambiguous: AmbiguousImportRow[];
+  invalid: InvalidImportRow[];
+}
+
+export interface BenchmarkOut {
+  kind: string;
+  price: string | null;
+  available: boolean;
+  method: string;
+  window: { start: string | null; end: string | null };
+  source: string | null;
+  observations: number;
+  /** Populated whenever `available` is false. Never a silent null. */
+  unavailable_reason: string | null;
+  flags: string[];
+}
+
+export interface ShortfallOut {
+  benchmark: string;
+  benchmark_price: string;
+  average_price: string;
+  currency_amount: string;
+  basis_points: number;
+  percent: number;
+  currency: string;
+  quantity: string;
+  multiplier: string;
+  convention: string;
+}
+
+export interface CostComponentOut {
+  name: string;
+  amount: string | null;
+  status: "MEASURED" | "MODELLED" | "RESIDUAL" | "NOT_MODELLED" | "UNAVAILABLE";
+  basis: string;
+}
+
+export interface CostDecompositionOut {
+  benchmark: string;
+  total: string;
+  currency: string;
+  components: CostComponentOut[];
+  caveat: string;
+}
+
+export interface MarketWindowOut {
+  instrument_id: string;
+  start: string;
+  end: string;
+  source: string;
+  staleness_tolerance_seconds: number;
+  coverage: {
+    observations: number;
+    window_seconds: number;
+    span_ratio: number;
+    largest_gap_seconds: number;
+    brackets_start: boolean;
+    brackets_end: boolean;
+    has_interval_volume: boolean;
+    is_sufficient: boolean;
+    minimum_observations: number;
+    minimum_span_ratio: number;
+    policy: string;
+  };
+}
+
+export interface ParentOrderOut {
+  key: string;
+  instrument_id: string;
+  canonical_key: string | null;
+  symbol: string | null;
+  side: string;
+  grouping_method: string;
+  /** True when the platform grouped the fills itself. Changes every benchmark. */
+  grouping_is_inferred: boolean;
+  fills: number;
+  filled_quantity: string;
+  multiplier: string;
+  currency: string;
+  average_price: string;
+  order_quantity: string | null;
+  unfilled_quantity: string | null;
+  fees: string;
+  start: string;
+  end: string;
+  duration_seconds: number;
+  has_submit_timestamp: boolean;
+  decision_timestamp: string | null;
+}
+
+export interface ExecutionAnalysisOut {
+  parent_order: ParentOrderOut;
+  primary_benchmark: string;
+  benchmarks: BenchmarkOut[];
+  shortfalls: ShortfallOut[];
+  unavailable_shortfalls: { benchmark: string; available: false; reason: string }[];
+  decomposition: CostDecompositionOut | null;
+  market_window: MarketWindowOut;
+  warnings: string[];
+}
+
+export interface ExecutionAnalysisResult {
+  parent_orders: number;
+  fills: number;
+  reports: ExecutionAnalysisOut[];
+  report_ids: string[];
+}
+
+export interface ExecutionReportSummary {
+  id: string;
+  instrument_id: string;
+  parent_order_key: string;
+  grouping_method: string;
+  grouping_is_inferred: boolean;
+  side: string;
+  canonical_key: string | null;
+  currency: string;
+  multiplier: string;
+  fills: number;
+  filled_quantity: string;
+  order_quantity: string | null;
+  average_price: string;
+  fees: string;
+  window_start: string;
+  window_end: string;
+  primary_benchmark: string;
+  primary_benchmark_price: string | null;
+  shortfall_currency: number | null;
+  shortfall_bps: number | null;
+  shortfall_percent: number | null;
+  observations: number;
+  coverage_span_ratio: number;
+  coverage_is_sufficient: boolean;
+  warnings: string[];
+  created_at: string;
+}
+
+export interface ExecutionRow {
+  id: string;
+  instrument_id: string;
+  side: string;
+  quantity: string;
+  execution_price: string;
+  exchange_timestamp: string;
+  order_id: string | null;
+  parent_order_key: string | null;
+  order_type: string;
+  limit_price: string | null;
+  order_quantity: string | null;
+  submit_timestamp: string | null;
+  decision_timestamp: string | null;
+  broker: string | null;
+  venue: string | null;
+  fees: string;
+  source: string;
+  created_at: string;
+}
+
+// -------------------------------------------------- execution simulation
+export interface StrategyInfo {
+  name: string;
+  version: string;
+  description: string;
+  /** What the caller must supply. The platform supplies none of it. */
+  requires: string[];
+}
+
+export interface ImpactModelInfo {
+  name: string;
+  version: string;
+  description: string;
+  /** False for every model until you supply a coefficient of your own. */
+  ships_calibrated_coefficients: boolean;
+}
+
+export interface ScheduleSliceOut {
+  index: number;
+  start: string;
+  end: string;
+  quantity: string;
+  participation: number | null;
+}
+
+export interface ScheduleOut {
+  strategy: string;
+  side: string;
+  parent_quantity: string;
+  slices: number;
+  start: string;
+  end: string;
+  duration_seconds: number;
+  peak_participation: number | null;
+  parameters: Record<string, unknown>;
+  assumptions: string[];
+  warnings: string[];
+  slice_detail?: ScheduleSliceOut[];
+}
+
+export interface SimulatedFillOut {
+  index: number;
+  timestamp: string;
+  quantity: string;
+  observed_price: string;
+  drifted_price: string;
+  fill_price: string;
+  spread_cost_per_unit: string;
+  temporary_impact_per_unit: string;
+  permanent_impact_per_unit: string;
+  participation: number | null;
+  price_age_seconds: number | null;
+}
+
+export interface UnfilledSliceOut {
+  index: number;
+  timestamp: string;
+  quantity: string;
+  reason: string;
+}
+
+export interface SimulatedStrategyOut {
+  /** Always true. A database CHECK makes anything else unstorable. */
+  counterfactual: boolean;
+  caveat: string;
+  strategy: string;
+  impact_model: string;
+  side: string;
+  ordered_quantity: string;
+  filled_quantity: string;
+  completion_rate: number;
+  average_price: string | null;
+  time_to_completion_seconds: number | null;
+  modelled_impact_cost: string;
+  modelled_spread_cost: string;
+  latency_seconds: number;
+  max_price_age_seconds: number;
+  shortfall: ShortfallOut | null;
+  benchmarks: BenchmarkOut[];
+  schedule: ScheduleOut;
+  context: Record<string, unknown>;
+  unfilled: UnfilledSliceOut[];
+  fills?: SimulatedFillOut[];
+  warnings: string[];
+}
+
+export interface StrategyComparisonOut {
+  counterfactual: boolean;
+  caveat: string;
+  comparison_caveat: string;
+  comparison_id: string;
+  window: { start: string; end: string };
+  strategies: SimulatedStrategyOut[];
+  unavailable: { strategy: string; reason: string }[];
+}
+
+export interface SimulationSummary {
+  id: string;
+  comparison_id: string;
+  instrument_id: string;
+  counterfactual: boolean;
+  strategy: string;
+  impact_model: string;
+  impact_is_calibrated: boolean;
+  side: string;
+  ordered_quantity: string;
+  filled_quantity: string;
+  completion_rate: number;
+  average_price: string | null;
+  window_start: string;
+  window_end: string;
+  latency_seconds: number;
+  max_price_age_seconds: number;
+  modelled_impact_cost: string;
+  modelled_spread_cost: string;
+  primary_benchmark: string | null;
+  shortfall_currency: number | null;
+  shortfall_bps: number | null;
+  warnings: string[];
+  created_at: string;
+}
+
+export interface Instrument {
+  id: string;
+  canonical_key: string;
+  asset_class: string;
+  exchange: string;
+  symbol: string;
+  underlying_id: string | null;
+  currency: string;
+  multiplier: string;
+  tick_size: string;
+  lot_size: string;
+  expiry: string | null;
+  strike: string | null;
+  option_type: string | null;
+  status: string;
+}
+
+// --------------------------------------------------------------- Phase 9
+export interface SSVIParameters {
+  rho: number;
+  eta: number;
+  gamma: number;
+}
+
+export interface GlobalSurfaceSummary {
+  global_surface_row_id: string;
+  surface_id: string;
+  underlying_id: string;
+  analysis_id: string;
+  as_of_timestamp: string;
+  model: string;
+  model_version: string;
+  status: string;
+  curve_id: string | null;
+  parameters: SSVIParameters | null;
+  n_slices: number;
+  n_observations: number;
+  rmse_vol_points: number | null;
+  min_durrleman_g: number | null;
+  max_butterfly_quantity: number | null;
+  butterfly_bounds_satisfied: boolean;
+  /** Structural for SSVI: a non-decreasing variance term structure cannot
+   *  contain calendar arbitrage. Not a diagnostic that happened to pass. */
+  calendar_arbitrage_free: boolean;
+  created_at: string;
+}
+
+export interface GlobalSurfaceSlice {
+  expiry: string;
+  time_to_expiry: number;
+  forward: number;
+  discount_factor: number;
+  theta: number;
+  atm_volatility: number | null;
+  forward_method: string | null;
+  forward_confidence: number;
+  diagnostics: {
+    n_observations: number;
+    rmse_vol_points: number;
+    max_error_vol_points: number;
+    k_min: number;
+    k_max: number;
+    butterfly_first: number;
+    butterfly_second: number;
+    butterfly_bounds_satisfied: boolean;
+    min_durrleman_g: number;
+  } | null;
+}
+
+export interface GlobalSurface {
+  global_surface_row_id: string;
+  surface_id: string;
+  underlying_id: string;
+  as_of_timestamp: string;
+  model: string;
+  model_version: string;
+  curve_id: string | null;
+  analysis_id: string | null;
+  underlying_price: number | null;
+  carry: number;
+  status: string;
+  parameters: SSVIParameters | null;
+  term_structure: {
+    maturities: number[];
+    thetas: number[];
+    is_monotone: boolean;
+  } | null;
+  slices: GlobalSurfaceSlice[];
+  diagnostics: {
+    n_observations: number;
+    n_slices: number;
+    rmse_vol_points: number | null;
+    max_error_vol_points: number | null;
+    min_durrleman_g: number | null;
+    max_butterfly_quantity: number | null;
+    butterfly_bounds_satisfied: boolean;
+    calendar_arbitrage_free: boolean;
+    starts_attempted: number;
+    starts_feasible: number;
+    optimizer: string;
+    optimizer_message: string | null;
+    error: string | null;
+  };
+}
+
+export interface LocalVolatilitySurface {
+  local_volatility_row_id: string;
+  global_surface_row_id: string;
+  as_of_timestamp: string;
+  model_version: string;
+  spot: number;
+  carry: number;
+  total_points: number;
+  valid_points: number;
+  /** Grid points where Dupire's formula produced nothing. Kept as holes with
+   *  their reasons rather than interpolated over. */
+  flagged_points: number;
+  coverage: number;
+  flag_counts: Record<string, number>;
+  log_moneyness: number[];
+  maturities: number[];
+  /** `null` marks a hole; a plot must not draw a line through one. */
+  values: (number | null)[][];
+}
+
+export interface RiskNeutralDensity {
+  density_row_id: string;
+  expiry: string;
+  time_to_expiry: number;
+  forward: number;
+  discount_factor: number;
+  total_mass: number;
+  implied_mean: number;
+  negative_mass: number;
+  mean_error: number;
+  is_admissible: boolean;
+  flags: string[];
+  percentiles: Record<string, number | null>;
+  strikes: number[];
+  density: number[];
+}
+
+export interface HestonCalibration {
+  heston_calibration_row_id: string;
+  as_of_timestamp: string;
+  model_version: string;
+  status: string;
+  v0: number | null;
+  kappa: number | null;
+  theta: number | null;
+  xi: number | null;
+  rho: number | null;
+  n_observations: number;
+  n_maturities: number;
+  rmse_vol_points: number | null;
+  max_error_vol_points: number | null;
+  feller: number | null;
+  satisfies_feller: boolean;
+  feller_enforced: boolean;
+  warnings: string[];
+  error: string | null;
+}
+
+export interface ModelValue {
+  model: string;
+  model_version: string;
+  /** Exactly one of these two is set, enforced by a database constraint. */
+  value: number | null;
+  unavailable_reason: string | null;
+  method: string;
+  inputs_used: Record<string, unknown>;
+  diagnostics: Record<string, unknown>;
+  warnings: string[];
+}
+
+export interface ConfidenceContribution {
+  name: string;
+  score: number;
+  weight: number;
+  basis: string;
+}
+
+export interface ModelConsensus {
+  consensus_row_id: string;
+  global_surface_row_id: string | null;
+  instrument_id: string;
+  expiry: string;
+  strike: string;
+  option_type: string;
+  as_of_timestamp: string;
+  model_version: string;
+  spot: number;
+  time_to_expiry: number;
+  risk_free_rate: number;
+  dividend_yield: number;
+  reference_volatility: number | null;
+  models_requested: number;
+  models_available: number;
+  /** The median of the models that produced a value. Not a price the contract
+   *  is worth, and deliberately less prominent than the range around it. */
+  reference_value: number | null;
+  reference_range: [number, number] | null;
+  model_dispersion: {
+    absolute: number | null;
+    relative: number | null;
+    standard_deviation: number | null;
+  };
+  market_price: number | null;
+  market_deviation: number | null;
+  market_deviation_relative: number | null;
+  confidence: number;
+  confidence_contributions: ConfidenceContribution[];
+  vanna: number | null;
+  volga: number | null;
+  charm_per_day: number | null;
+  values: ModelValue[];
+  created_at: string;
+}
