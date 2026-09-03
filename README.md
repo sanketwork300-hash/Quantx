@@ -48,10 +48,12 @@ produced it, the assumptions that were made, and what the platform could not do.
 
 ---
 
-## Status: Phases 0 through 8 complete
+## Status: Phases 0 through 11 complete
 
-Three phases remain (9 through 11); `docs/backlog.md` has the plan and the
-acceptance criteria each must meet.
+All eleven phases in `docs/backlog.md` have shipped, each as a vertical slice —
+data model, service, API, tests, docs and UI — and each gated on the previous
+one's acceptance criteria passing in CI. The backlog records what every phase
+claimed and the test that carries the claim.
 
 **Phase 0 — foundation.**
 Repository skeleton with layering rules **enforced in CI**; Docker Compose
@@ -403,7 +405,7 @@ make check             # everything CI runs
 apps/            process entrypoints (api, worker, scheduler) — wiring only
 api/             HTTP: routing, schemas, authz. No financial mathematics.
 domains/         instruments, market_data, derivatives, portfolio, risk,
-                 scenarios, execution, jobs, users, reports
+                 scenarios, execution, microstructure, jobs, users, reports
 quant/           pure numerics: pricing, volatility, statistics, simulation,
                  numerical, interpolation, daycount
 infrastructure/  database, cache, queue, storage, observability, security
