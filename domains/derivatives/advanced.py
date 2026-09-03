@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from domains.derivatives.application import AnalysisError, DerivativesService
 from domains.derivatives.consensus import (
     CONSENSUS_MODEL_VERSION,
+    DEFAULT_MODELS,
     ConfidenceContribution,
     ConsensusInputs,
     ConsensusResult,
@@ -38,6 +39,7 @@ from domains.derivatives.global_surface import (
     GlobalSurfaceSlice,
 )
 from domains.derivatives.repository import DerivativesRepository
+from domains.derivatives.surface import ReferencePoint, SurfaceSliceFit
 from domains.instruments.enums import AssetClass, OptionType
 from domains.instruments.service import InstrumentService
 from domains.market_data.service import MarketDataService
@@ -133,6 +135,131 @@ class PriceConsensusParams:
             "seed": self.seed,
             "grid": {"nodes": self.grid_nodes, "steps": self.grid_steps},
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ContractConsensusParams:
+    """The contract's inputs, decided by the caller and reused unchanged.
+
+    Every model sees the same spot, maturity, rate, dividend and reference
+    volatility. That is the point of the comparison: given their own inputs the
+    dispersion would measure the inputs rather than the models.
+    """
+
+    spot: float
+    tau: float
+    rate: float
+    dividend: float
+    reference: ReferencePoint
+    surface_id: str
+    slice_fit: SurfaceSliceFit | None = None
+    #: The observed two-sided mid, or ``None``. Never a model value, and never
+    #: substituted from one.
+    market_price: float | None = None
+    models: tuple[PricingModelKind, ...] = field(default=())
+    paths: int = 20_000
+    seed: int = 20_260_924
+    grid_nodes: int = 201
+    grid_steps: int = 100
+
+    def to_provenance(self) -> dict:
+        return {
+            "spot": self.spot,
+            "time_to_expiry": self.tau,
+            "risk_free_rate": self.rate,
+            "dividend_yield": self.dividend,
+            "reference_volatility": self.reference.reference_iv,
+            "surface_id": self.surface_id,
+            "models": [str(model) for model in (self.models or DEFAULT_MODELS)],
+            "paths": self.paths,
+            "seed": self.seed,
+            "grid": {"nodes": self.grid_nodes, "steps": self.grid_steps},
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ContractConsensus:
+    """Several models on one contract, and no verdict between them."""
+
+    instrument_id: uuid.UUID
+    result: ConsensusResult
+    reference: ReferencePoint
+    surface_id: str
+    local_volatility_surface_id: str | None = None
+    heston_calibration_id: uuid.UUID | None = None
+    warnings: tuple[AnalyticalWarning, ...] = ()
+
+    def to_dict(self) -> dict:
+        payload = self.result.to_dict()
+        payload["instrument_id"] = str(self.instrument_id)
+        payload["reference_point"] = self.reference.to_dict()
+        payload["surfaces"] = {
+            "reference_surface_id": self.surface_id,
+            "local_volatility_surface_id": self.local_volatility_surface_id,
+            "heston_calibration_id": (
+                str(self.heston_calibration_id) if self.heston_calibration_id else None
+            ),
+        }
+        payload["warnings"] = [warning.to_dict() for warning in self.warnings]
+        return payload
+
+
+def _surface_confidence(
+    reference: ReferencePoint, slice_fit: SurfaceSliceFit | None
+) -> tuple[ConfidenceContribution, ...]:
+    """What the consensus cannot see from the contract alone.
+
+    The same three dimensions ``price_consensus`` folds in, read off the fitted
+    slice this reference came from rather than off a stored global-surface row.
+    """
+    status = slice_fit.calibration.status if slice_fit is not None else None
+    contributions = [
+        ConfidenceContribution(
+            name="surface_admissibility",
+            score=(
+                1.0
+                if status is CalibrationStatus.CONVERGED
+                else 0.4
+                if status is CalibrationStatus.DEGRADED
+                else 0.0
+            ),
+            weight=1.5,
+            basis=(
+                f"the slice this reference came from calibrated to status "
+                f"{status if status is not None else 'unknown'}. A degraded slice "
+                "still produces reference values and they are still worth less."
+            ),
+        ),
+        ConfidenceContribution(
+            name="extrapolation",
+            score=0.5 if reference.flags else 1.0,
+            weight=1.0,
+            basis=(
+                "the reference value carries "
+                + (
+                    ", ".join(str(flag) for flag in reference.flags)
+                    if reference.flags
+                    else "no extrapolation flag"
+                )
+                + "."
+            ),
+        ),
+    ]
+    rmse = reference.calibration_rmse_vol_points
+    if rmse is not None:
+        contributions.append(
+            ConfidenceContribution(
+                name="surface_fit",
+                score=max(0.0, min(1.0, 1.0 / (1.0 + (rmse / 1.0) ** 2))),
+                weight=1.0,
+                basis=(
+                    f"the fitted expiry has {rmse:.2f} volatility points of RMSE, "
+                    "scored against a one-point reference. Every model below that "
+                    "reads the surface inherits that error."
+                ),
+            )
+        )
+    return tuple(contributions)
 
 
 class AdvancedDerivativesService:
@@ -604,6 +731,114 @@ class AdvancedDerivativesService:
         return await self.repository.list_consensus_runs(user_id, limit=limit, offset=offset)
 
     # ------------------------------------------------------------ consensus
+    async def contract_consensus(
+        self,
+        user_id: uuid.UUID,
+        instrument,
+        params: ContractConsensusParams,
+    ) -> ContractConsensus:
+        """Run the model comparison on one contract inside somebody else's snapshot.
+
+        Phase 11. ``price_consensus`` above owns the standalone endpoint: it
+        loads a global surface, decides the contract's inputs from it and stores
+        the run. This one is handed the inputs — spot, maturity, reference
+        volatility and the observed mid — because they must be *the same inputs*
+        the rest of a unified order analysis used. Deriving them again here is
+        precisely the drift the shared ``MarketState`` exists to prevent.
+
+        Nothing is persisted. The consensus row schema requires a global surface
+        and this path may not have one; a row that named a surface it did not
+        use would be worse than no row.
+
+        Models that need something this snapshot does not carry report
+        themselves unavailable with a reason, and the reduced model count shows
+        up in the confidence score rather than being absorbed.
+        """
+        warnings: list[AnalyticalWarning] = []
+
+        heston = None
+        heston_row = None
+        if instrument.underlying_id is not None:
+            heston_row = await self.repository.latest_heston_calibration(
+                user_id, instrument.underlying_id
+            )
+        if heston_row is not None and heston_row.v0 is not None:
+            heston = HestonParameters(
+                v0=heston_row.v0,
+                kappa=heston_row.kappa,
+                theta=heston_row.theta,
+                xi=heston_row.xi,
+                rho=heston_row.rho,
+            )
+        else:
+            warnings.append(
+                AnalyticalWarning.info(
+                    AdvancedWarningCode.NO_HESTON,
+                    "No Heston calibration exists for this underlying, so that model "
+                    "reports itself unavailable rather than being run on invented "
+                    "parameters.",
+                )
+            )
+
+        local_vol = None
+        global_row = None
+        if params.reference.reference_iv is not None and instrument.underlying_id is not None:
+            loaded = await self.latest_global_surface(user_id, instrument.underlying_id)
+            if loaded is not None:
+                global_row, global_surface = loaded
+                local_vol = global_surface.local_volatility(params.reference.reference_iv)
+        if local_vol is None:
+            warnings.append(
+                AnalyticalWarning.info(
+                    AdvancedWarningCode.NO_LOCAL_VOL,
+                    "No arbitrage-free global surface is available for this "
+                    "underlying, so no Dupire local volatility could be built and "
+                    "the PDE model reports itself unavailable.",
+                )
+            )
+
+        inputs = ConsensusInputs(
+            spot=params.spot,
+            strike=float(instrument.strike),
+            tau=params.tau,
+            rate=params.rate,
+            dividend=params.dividend,
+            is_call=instrument.option_type is OptionType.CALL,
+            reference_volatility=params.reference.reference_iv,
+            local_volatility=local_vol,
+            heston=heston,
+            grid=GridSpec(nodes=params.grid_nodes, steps=params.grid_steps),
+            paths=params.paths,
+            seed=params.seed,
+        )
+        result = ModelConsensusService().price(
+            inputs,
+            models=params.models or DEFAULT_MODELS,
+            market_price=params.market_price,
+            external_contributions=_surface_confidence(params.reference, params.slice_fit),
+        )
+        if params.market_price is None:
+            warnings.append(
+                AnalyticalWarning.info(
+                    AdvancedWarningCode.NO_MARKET_PRICE,
+                    "There is no two-sided observed price for this contract in the "
+                    "snapshot, so the deviation between the models and the market is "
+                    "absent rather than zero.",
+                )
+            )
+
+        return ContractConsensus(
+            instrument_id=instrument.id,
+            result=result,
+            reference=params.reference,
+            surface_id=params.surface_id,
+            local_volatility_surface_id=(
+                global_row.surface_id if global_row is not None and local_vol is not None else None
+            ),
+            heston_calibration_id=heston_row.id if heston is not None else None,
+            warnings=tuple((*warnings, *result.warnings)),
+        )
+
     async def price_consensus(
         self,
         user_id: uuid.UUID,

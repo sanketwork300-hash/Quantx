@@ -24,6 +24,7 @@ from domains.reports.composition import (
     FactorHistoryComposer,
     ValuationContextComposer,
 )
+from domains.reports.order_analysis import OrderAnalysisService
 from domains.risk.application import RiskApplicationService
 from domains.scenarios.service import ScenarioService
 from domains.users.models import User
@@ -161,6 +162,13 @@ def risk_service(session: SessionDep, settings: SettingsDep) -> RiskApplicationS
     return RiskApplicationService(session, settings)
 
 
+def order_analysis_service(
+    session: SessionDep, settings: SettingsDep, store: ObjectStoreDep
+) -> OrderAnalysisService:
+    """The full cross-engine fan-out: all five engines over one snapshot."""
+    return OrderAnalysisService(session, settings, store)
+
+
 def scenario_service(session: SessionDep) -> ScenarioService:
     return ScenarioService(session)
 
@@ -202,3 +210,4 @@ ExecutionServiceDep = Annotated[ExecutionApplicationService, Depends(execution_s
 ExecutionWindowComposerDep = Annotated[ExecutionWindowComposer, Depends(execution_window_composer)]
 ScenarioServiceDep = Annotated[ScenarioService, Depends(scenario_service)]
 FactorHistoryComposerDep = Annotated[FactorHistoryComposer, Depends(factor_history_composer)]
+OrderAnalysisServiceDep = Annotated[OrderAnalysisService, Depends(order_analysis_service)]

@@ -80,7 +80,9 @@ are shown alongside the range rather than only summarised by it.
 Mixing a 09:15 delta with a 09:47 vega produces a risk number that never existed.
 
 **Mitigation.** `MarketState` is immutable and content-addressed; all five
-branches of order analysis share one `state_id`; provenance records it.
+branches of order analysis share one `state_id`; provenance records it. Shipped
+in Phase 11 and asserted over the wire: the set of state ids across the five
+branch provenance blocks of a live response has exactly one element.
 
 ## R6. Numerical failure on real-world data  — **MEDIUM-HIGH**
 
@@ -142,7 +144,9 @@ project is most likely to actually die of.
 
 **Mitigation.** Strict phase gating with acceptance criteria; vertical slices
 only; `docs/backlog.md` is the contract. Phase 11 (the integration) is the point
-of the product, and every earlier phase is judged by whether it feeds it.
+of the product, and every earlier phase is judged by whether it feeds it. It
+shipped, and it consumed all five engines without a sixth calculator: the
+composer computes nothing of its own.
 
 ## R13. Dependency and licence risk  — **LOW-MEDIUM**
 

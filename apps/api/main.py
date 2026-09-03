@@ -20,6 +20,7 @@ from api.routes import (
     jobs,
     market,
     microstructure,
+    orders,
     portfolio,
     risk,
     uploads,
@@ -119,6 +120,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         risk.router,
         execution.router,
         microstructure.router,
+        orders.router,
         jobs.router,
     ):
         app.include_router(router, prefix=API_PREFIX)

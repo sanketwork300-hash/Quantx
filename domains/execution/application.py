@@ -29,6 +29,13 @@ from domains.execution.importer import (
     commit_instruments,
 )
 from domains.execution.models import ParentOrder, Side, group_executions
+from domains.execution.orders import (
+    FLAT_REFERENCE_CAVEAT,
+    OrderCostEstimate,
+    OrderCostRequest,
+    OrderCostWarning,
+    estimate_order_cost,
+)
 from domains.execution.repository import ExecutionRepository, to_execution
 from domains.execution.simulation import (
     SIMULATION_MODEL_VERSION,
@@ -613,6 +620,29 @@ class ExecutionApplicationService:
             )
         await self.repository.add_simulations(rows)
 
+    def estimate_order_cost(
+        self,
+        request: OrderCostRequest,
+        permanent_coefficient: float = 1.0,
+        temporary_coefficient: float = 1.0,
+    ) -> tuple[OrderCostEstimate, tuple[AnalyticalWarning, ...]]:
+        """Estimated slippage for an order that has not been placed.
+
+        Nothing is persisted: there is no execution, no schedule anyone
+        committed to and no fill to measure. The estimate belongs to whatever
+        analysis asked for it, and Phase 11 stores it inside that analysis with
+        the snapshot it was computed against.
+        """
+        try:
+            impact = build_impact_model(
+                request.impact_model, permanent_coefficient, temporary_coefficient
+            )
+        except ImpactError as exc:
+            raise SimulationRefused(str(exc)) from exc
+
+        estimate = estimate_order_cost(request, impact)
+        return estimate, tuple(_order_cost_warnings(estimate))
+
     async def get_simulation(self, simulation_id: uuid.UUID, user_id: uuid.UUID):
         return await self.repository.get_simulation(simulation_id, user_id)
 
@@ -735,3 +765,59 @@ def _simulation_warnings(comparison: StrategyComparison) -> list[AnalyticalWarni
             )
         )
     return warnings
+
+
+#: One sentence per code, so a reader is told what an absent number means
+#: rather than being left to infer it from the code.
+_ORDER_COST_MESSAGES = {
+    OrderCostWarning.COUNTERFACTUAL: (
+        "An estimate of what this order would cost, not a measurement of what "
+        "anything did cost. No order was placed."
+    ),
+    OrderCostWarning.FLAT_REFERENCE: FLAT_REFERENCE_CAVEAT,
+    OrderCostWarning.NO_SPREAD: (
+        "No two-sided quote was observed for this contract, so the spread half "
+        "of the cost is absent rather than zero, and no total is stated."
+    ),
+    OrderCostWarning.NO_ADV: (
+        "No average daily volume was supplied. The platform holds none, so "
+        "market impact has no size to be relative to; it is reported as absent "
+        "rather than as zero, and no total slippage is stated."
+    ),
+    OrderCostWarning.NO_VOLATILITY: (
+        "No volatility was supplied, so the impact model has no scale and every "
+        "impact figure below is zero by arithmetic rather than by measurement."
+    ),
+    OrderCostWarning.IMPACT_NOT_CALIBRATED: (
+        "The impact coefficients are at their uncalibrated default of one. The "
+        "impact figures are therefore the shape of the model in units of "
+        "sigma * sqrt(Q/ADV), not a magnitude this platform is claiming. Supply "
+        "coefficients measured on your own executions to change that."
+    ),
+    OrderCostWarning.STRATEGY_UNAVAILABLE: (
+        "One or more requested schedules could not be built from what was "
+        "supplied. Each is listed with its reason rather than omitted."
+    ),
+    OrderCostWarning.PASSIVE_FILL_NOT_MODELLED: (
+        "The limit price rests behind the touch, so this order would not cross. "
+        "Every figure is conditional on it filling in full, and whether a "
+        "resting order fills is not modelled here."
+    ),
+    OrderCostWarning.LARGER_THAN_A_DAY: (
+        "The order is larger than the whole day's volume that was supplied. The "
+        "impact model is far outside any range it was ever fitted in."
+    ),
+}
+
+
+def _order_cost_warnings(estimate: OrderCostEstimate) -> list[AnalyticalWarning]:
+    severities = {
+        OrderCostWarning.COUNTERFACTUAL: AnalyticalWarning.info,
+        OrderCostWarning.FLAT_REFERENCE: AnalyticalWarning.info,
+        OrderCostWarning.PASSIVE_FILL_NOT_MODELLED: AnalyticalWarning.warn,
+    }
+    return [
+        severities.get(code, AnalyticalWarning.warn)(code, _ORDER_COST_MESSAGES[code])
+        for code in estimate.warnings
+        if code in _ORDER_COST_MESSAGES
+    ]

@@ -444,10 +444,79 @@ is the honest model of trades exciting cancellations and each side exciting the
 other, and it is named as later work rather than approximated by fitting one
 univariate process to a superposition and calling it order flow.
 
-## Phase 11 — Unified order analysis  `[ ]`
+## Phase 11 — Unified order analysis  `[x]`
 
 Compose valuation + surface + risk + margin + execution over one `MarketState`.
 
-**Acceptance**: one `market_state_id` in the provenance of all five branches;
-branch failure degrades to `PARTIAL`; the response schema contains no
-recommendation field, asserted by test.
+- [x] `OrderAnalysisService` in `domains/reports`: the one place permitted to
+      fan out across all five engines, and permitted only to compose them
+- [x] One `ValuationContext` covering the book's underlyings **and** the order's,
+      built once and handed to every branch
+- [x] The proposed position, valued by the code that values a stored one,
+      against that same context and never written
+- [x] Valuation branch: the observed two-sided market, plus a reference range
+      across the models that could run, their dispersion and a confidence whose
+      contributions are listed
+- [x] Surface branch: this contract scored by the Phase 3 anomaly scanner, made
+      public as `score_point` rather than reimplemented
+- [x] Execution branch: a forward cost estimate against a reference held flat,
+      sharing the Phase 8 slice convention, split into a measured spread half
+      and a modelled impact half
+- [x] Risk and margin branches: the same estimators run on the book and on the
+      book with the order in it, over one factor panel, one seed, one grid
+- [x] `POST /order-analysis` inline, plus `GET` by id and by portfolio
+- [x] `order_analyses` table with two CHECK constraints and no column a
+      recommendation could go in
+- [x] UI: the order-analysis page, five branches side by side
+
+**Acceptance — verified**
+
+| Criterion | Where |
+| --- | --- |
+| **One `market_state_id` in the provenance of all five branches** | `tests/integration/test_order_analysis.py::TestOneSnapshotForEveryBranch` — the set of state ids across the five branch provenance blocks has exactly one element, it matches the envelope's and the payload's, and `test_every_branch_names_the_same_moment_as_well` carries the same over the timestamp |
+| Branch failure degrades to `PARTIAL` | `TestBranchesDegradeIndependently::test_the_status_is_partial_when_a_branch_failed` — an order on a non-option fails valuation and surface, names a reason on each, and execution, risk and margin still answer |
+| A branch that needs history it does not have is an absence, not a number | `test_a_book_with_no_history_still_answers_four_branches` — the Greeks stand, `value_at_risk` is `null`, and `RISK_INSUFFICIENT_HISTORY` says why |
+| **The response schema contains no recommendation field** | `TestLanguage::test_no_response_carries_a_recommendation_field` walks every key at every depth of a live response against a closed list; `test_the_published_schema_has_no_recommendation_field` walks the published OpenAPI components; `test_no_response_advises_or_promises` scans the whole serialised payload for forbidden phrasing |
+| An order that cannot be repriced is refused, not scored zero | `TestAnOrderThatCannotBeRepricedIsRefused` — risk and margin both return `FAILED` with `INCREMENTAL_ORDER_NOT_REPRICEABLE` and the exclusion reason, while the branches that do not need a repriceable book still answer; `tests/unit/test_incremental_risk.py::test_an_order_that_cannot_be_repriced_is_reported_not_absorbed` pins the same at the domain level |
+| The difference is the order's | `TestTheOrderIsInTheNumbers` — doubling the order doubles its Greek contribution, a buy and a sell move the book by equal and opposite amounts, and every `change` equals `proposed - current` |
+| The two cost estimators are one convention | `tests/unit/test_order_cost.py::TestOneConvention` — the forward estimate and the Phase 8 simulator agree slice for slice on a flat path, on both sides, for fill price, spread, temporary and permanent impact |
+| A cost that cannot be estimated is absent, not zero | `TestWhatCannotBeEstimated` — no daily volume leaves the impact half and the total `null` with the spread half still reported; no two-sided quote leaves the spread half `null`; a strategy that cannot be built is listed with its reason |
+| Nothing claims that working an order is cheaper | `test_this_model_does_not_say_that_working_an_order_is_cheaper` — the permanent term rises with the slice count and the temporary term falls, pinned in both directions |
+| A limit order's fill is classified, never predicted | `TestMarketability` — marketable, passive and unknown against the touch that would have to be crossed, and a passive order says its fill is not modelled |
+| Observations are still observations | `TestObservationsAndEstimatesStaySeparate` — the observed block carries bid, ask and mid with the note that a mid is absent rather than substituted from a print, and the reference value is a range across models with every unavailable model naming its reason |
+| The stored row cannot claim more than it has | `ck_order_analysis_status_matches_its_branches` and `ck_order_analysis_names_its_market_state`, with `test_the_stored_row_names_that_snapshot` reading the row back |
+| The same order twice is the same analysis | `TestReproducibility` — one content-addressed snapshot and one derived proposed-position id, and a different size is a different position |
+| Ownership is enforced in the query | `TestOwnership` — a foreign portfolio and a foreign analysis are both 404 |
+
+**Design notes**
+
+- **The snapshot is the deliverable.** Every branch here already existed. What
+  Phase 11 adds is that they run against one `MarketState`, so the number a user
+  actually reads — the difference between the book and the book with their order
+  in it — is attributable. Building five analyses that each fetched their own
+  market would have produced the same fields and none of the meaning.
+- **A row of zeros is the dangerous output.** The first working version reported
+  a proposed position that could not be repriced as deltas of exactly zero,
+  which reads as an order that adds no risk and is the single worst sentence
+  this endpoint could produce. `CombinedBook.order_is_repriceable` exists so the
+  caller cannot read the numbers without reading that flag first.
+- **One panel for both sides.** Building a factor panel per side let an order on
+  a new underlying shorten the aligned sample the *current* book was measured
+  on, and the difference then contained that as well as the order. One panel
+  over the combined book is used for both, and the fact that this can shorten
+  the sample for both is a warning on the branch rather than a hidden effect.
+- **The impact model does not say what it looks like it says.** Permanent impact
+  is evaluated per slice and accumulates, so splitting an order raises it as
+  roughly the square root of the slice count while lowering the temporary term.
+  Which dominates depends on coefficients nobody here has calibrated. The
+  estimate therefore carries no argument for or against working an order, and a
+  test pins both directions so such a claim cannot appear by accident.
+
+**What is deliberately not here**: a fill-probability model for a passive limit
+order, an idempotency key on the endpoint, and any aggregation of the five
+branches into a single figure. The first needs the queue at the level, which is
+a gated microstructure capability that most feeds cannot support, and splicing a
+bracketed queue estimate into a cost figure would bury the gate. The third is
+the recommendation field under another name: any weighting of reference value
+against slippage against margin is a statement about someone's risk appetite,
+and the platform does not have one.

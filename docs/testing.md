@@ -180,7 +180,12 @@ produce, which needs a different kind of test. Three shapes are used:
   `exchange_margin` must not be keys of the result payload, so a future addition
   has to delete a test to land. Phase 9 does the same for the consensus:
   `best_model`, `true_price`, `fair_value`, `recommendation` and `signal` are
-  checked against every key at every depth of the serialised response.
+  checked against every key at every depth of the serialised response. Phase 11
+  checks the same closed list three ways over the unified order analysis: every
+  key at every depth of a live response, every property of the published OpenAPI
+  components, and the whole serialised payload against a list of forbidden
+  phrasing. The endpoint's guarantee is that there is nowhere for advice to go,
+  so the schema is tested as well as the value.
 
 ### Testing a gate
 
@@ -207,6 +212,43 @@ needs a shape of test the others do not.
   set of reasons the fixtures triggered with `set(SnapshotRejection)` and
   `set(EventRejection)` by equality, so a new rejection reason cannot be added
   without a fixture row that produces it.
+
+### Testing a zero that must never be reported
+
+Phase 11's most dangerous output is not a wrong number, it is a **row of
+zeros**: if the proposed contract cannot be repriced it never enters the
+combined book, both sides of every comparison are identical, and every
+difference is exactly zero — which reads as an order that adds no risk.
+
+- **Test the refusal at both levels.**
+  `test_an_order_that_cannot_be_repriced_is_reported_not_absorbed` asserts at the
+  domain level that the two exposure sets really are identical and that the flag
+  says so; `TestAnOrderThatCannotBeRepricedIsRefused` asserts over the wire that
+  the risk and margin branches then return `FAILED` with the exclusion reason
+  rather than the zeros, while the branches that do not need a repriceable book
+  still answer.
+- **Test that a difference is a difference.** Doubling the order doubles its
+  Greek contribution, and a buy and a sell of the same size move the book by
+  equal and opposite amounts. Both would pass trivially against a broken
+  implementation that returned zeros, which is why the refusal above is tested
+  separately rather than inferred from them.
+- **Test the shared snapshot as a set, not as an equality.** The acceptance
+  criterion is that all five branches read one `MarketState`, so the test builds
+  the *set* of `market_state_id` values across the five provenance blocks and
+  asserts it has exactly one element. A pairwise comparison would pass a
+  four-branch response.
+- **Test the two cost estimators against each other.** The Phase 8 simulator and
+  the Phase 11 forward estimate answer different questions but must share one
+  convention. `TestOneConvention` runs both over a flat path and compares fill
+  price, spread, temporary and permanent impact slice for slice, on both sides,
+  so the convention has one definition and two entry points rather than two
+  definitions.
+- **Test the property the model does *not* have.** It is tempting to assert that
+  working an order lowers its cost. It does not, in this model: permanent impact
+  accumulates per slice while the temporary term falls, and which dominates is a
+  property of uncalibrated coefficients.
+  `test_this_model_does_not_say_that_working_an_order_is_cheaper` pins both
+  directions, so such a claim cannot appear by accident.
 
 ### Two invariants that exist to catch a future change
 

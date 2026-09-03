@@ -39,6 +39,14 @@ MIN_DEPTH_LEVELS = 2
 #: be separately identifiable, plus a held-out window the comparison can see.
 #: These mirror the constants in :mod:`quant.microstructure.intensity`, which is
 #: where they are argued for.
+#:
+#: This is the sum of those two minima, and it is deliberately the *loosest*
+#: bar the fit could ever clear rather than the bar for any particular split.
+#: The train fraction is a parameter of the request, so the gate cannot know it:
+#: a 70-event tape passes here and is then refused by ``fit_hawkes`` at a 0.7
+#: split, which leaves 49 training events. That is the right division of labour
+#: — the gate judges the dataset, the fit judges the split — and the second
+#: refusal is returned as a stated reason rather than a failure.
 MIN_INTENSITY_EVENTS = 70
 MIN_CANCEL_EVENTS = 20
 

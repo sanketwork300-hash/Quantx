@@ -12,10 +12,11 @@ The id is **content-addressed**: identical inputs produce an identical id, so
 rehydrating a stored state and recomputing gives the same answer. That is what
 makes an analysis reproducible rather than merely repeatable.
 
-Phase 2 populates quotes, spot prices, the curve, surfaces and per-instrument
-quality. The future/FX maps are declared but empty until the phases that own
-them arrive — declared rather than omitted so consumers can be written against
-the final shape now.
+Phase 2 populates quotes, spot prices, the curve and surfaces; Phase 11 added
+per-instrument quality, rehydrated from the measurement made at ingestion rather
+than measured a second time. The future/FX maps are declared but empty until the
+phases that own them arrive — declared rather than omitted so consumers can be
+written against the final shape now.
 """
 
 from __future__ import annotations

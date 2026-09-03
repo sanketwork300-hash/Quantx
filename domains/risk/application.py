@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from domains.portfolio.application import (
     ComputedValuation,
     PortfolioApplicationService,
+    ProposedPositionValuation,
     ValuePortfolioParams,
 )
 from domains.reports.envelope import AnalyticalResult
@@ -24,6 +25,17 @@ from domains.reports.provenance import Provenance
 from domains.reports.warnings import AnalyticalWarning
 from domains.risk.exposure import ExposureSet, build_exposures
 from domains.risk.factors import AlignmentPolicy, FactorPanel, FactorSeries, build_panel
+from domains.risk.incremental import (
+    INCREMENTAL_MODEL_VERSION,
+    CombinedBook,
+    IncrementalGreeks,
+    IncrementalWarning,
+    combine,
+    greeks_of,
+    incremental_margin,
+    incremental_stress,
+    incremental_var,
+)
 from domains.risk.margin import MarginParameters, ShockGrid, build_model
 from domains.risk.repository import RiskRepository
 from domains.risk.stress import ContributionDimension, apply_scenario
@@ -472,6 +484,168 @@ class RiskApplicationService:
             status = AnalyticalResult.partial(payload, provenance, tuple(warnings))
         return status, row.id
 
+    # ---------------------------------------------------------- incremental
+    def incremental_book(
+        self, computed: ComputedValuation, proposed: ProposedPositionValuation
+    ) -> CombinedBook:
+        """The book, the proposed order, and the two together.
+
+        Both sides are built by ``build_exposures`` from valuations taken in the
+        *same* ``ValuationContext``, so an anchor that differs between them is
+        not possible by construction rather than by convention.
+        """
+        strategy_tags = {
+            position.id: position.strategy_tag
+            for position in computed.positions
+            if position.strategy_tag
+        }
+        current = build_exposures(computed.valuation, computed.context, strategy_tags)
+        order = build_exposures(proposed.valuation, computed.context)
+        return combine(current, order)
+
+    async def run_incremental_risk(
+        self,
+        user_id: uuid.UUID,
+        portfolio_id: uuid.UUID,
+        computed: ComputedValuation,
+        book: CombinedBook,
+        params: RiskRunParams,
+        method: VaRMethod,
+        history_composer,
+        scenario: Scenario | None = None,
+        time_decay_days: float = 0.0,
+    ) -> AnalyticalResult[dict]:
+        """Greeks, VaR/ES and one scenario, before and after the order.
+
+        Nothing is persisted: this is an analysis of a position that does not
+        exist, and writing a risk snapshot for it would put a book nobody holds
+        into the portfolio's own risk history.
+        """
+        provenance = self._provenance(portfolio_id, computed, params, method=method)
+        provenance.model_versions["incremental"] = INCREMENTAL_MODEL_VERSION
+
+        if not book.order_is_repriceable:
+            return AnalyticalResult.failed(
+                provenance,
+                (
+                    AnalyticalWarning.error(
+                        IncrementalWarning.ORDER_NOT_REPRICEABLE,
+                        "The proposed contract could not be repriced "
+                        f"({book.order_exclusion_reason}), so it contributes nothing "
+                        "to either side of the comparison. Every difference would be "
+                        "exactly zero, which would read as an order that adds no "
+                        "risk. It is refused instead.",
+                        reason=book.order_exclusion_reason,
+                    ),
+                ),
+            )
+
+        greeks = IncrementalGreeks(
+            current=greeks_of(book.current), proposed=greeks_of(book.proposed)
+        )
+        payload: dict = {
+            "book": book.to_dict(),
+            "greeks": greeks.to_dict(),
+            "value_at_risk": None,
+            "stress": None,
+        }
+        warnings: list[AnalyticalWarning] = [*computed.warnings, *_snapshot_warnings(book.proposed)]
+
+        series = await history_composer.build(
+            user_id,
+            [uuid.UUID(key) for key in book.proposed.underlying_keys()],
+            limit=params.lookback or 500,
+            include_volatility=params.include_volatility_factor,
+        )
+        panel = _panel_from(series, params)
+
+        if panel is None or not panel.is_sufficient:
+            warnings.append(
+                AnalyticalWarning.error(
+                    RiskWarningCode.INSUFFICIENT_HISTORY,
+                    "The factor history this platform holds is too short to "
+                    f"estimate risk from: {panel.observations if panel else 0} "
+                    "aligned observations. The Greeks above stand; the value-at-risk "
+                    "comparison does not, and is absent rather than estimated from "
+                    "too few points.",
+                    observations=panel.observations if panel else 0,
+                )
+            )
+        else:
+            measured = incremental_var(
+                book,
+                panel,
+                method,
+                lambda exposures, factors: _dispatch(method, exposures, factors, params),
+            )
+            payload["value_at_risk"] = measured.to_dict()
+            warnings.extend(_result_warnings(measured.warnings))
+            warnings.extend(_incremental_warnings(measured.warnings))
+
+        if scenario is not None:
+            stressed = incremental_stress(book, scenario, time_decay_days=time_decay_days)
+            payload["stress"] = stressed.to_dict()
+        else:
+            warnings.append(
+                AnalyticalWarning.info(
+                    "INCREMENTAL_NO_SCENARIO",
+                    "No scenario was requested, so no stress comparison was run.",
+                )
+            )
+
+        return AnalyticalResult.ok(payload, provenance, tuple(warnings))
+
+    def run_incremental_margin(
+        self,
+        portfolio_id: uuid.UUID,
+        computed: ComputedValuation,
+        book: CombinedBook,
+        params: RiskRunParams,
+        margin_params: MarginRunParams,
+    ) -> AnalyticalResult[dict]:
+        """Estimated margin, buffer and utilisation, before and after the order."""
+        try:
+            model = build_model(margin_params.model, margin_params.to_margin_parameters())
+        except ValueError as exc:
+            raise RiskError(str(exc)) from exc
+
+        provenance = self._provenance(
+            portfolio_id, computed, params, margin=margin_params, method_name=model.identifier
+        )
+        provenance.model_versions["incremental"] = INCREMENTAL_MODEL_VERSION
+
+        if not book.order_is_repriceable:
+            return AnalyticalResult.failed(
+                provenance,
+                (
+                    AnalyticalWarning.error(
+                        IncrementalWarning.ORDER_NOT_REPRICEABLE,
+                        "The proposed contract could not be repriced "
+                        f"({book.order_exclusion_reason}), so the margin estimate "
+                        "would be identical before and after. It is refused rather "
+                        "than reported as an order that consumes no margin.",
+                        reason=book.order_exclusion_reason,
+                    ),
+                ),
+            )
+
+        measured = incremental_margin(
+            book,
+            model,
+            eligible_capital=margin_params.eligible_capital,
+            ladder=tuple(margin_params.ladder),
+            vol_co_shock=margin_params.vol_co_shock,
+        )
+        warnings = [
+            AnalyticalWarning.info(
+                RiskWarningCode.NOT_BROKER_MARGIN,
+                measured.proposed.base.disclaimer,
+                method=model.identifier,
+            ),
+            *_margin_warnings(measured.proposed),
+        ]
+        return AnalyticalResult.ok(measured.to_dict(), provenance, tuple(warnings))
+
     async def get_margin(self, margin_id: uuid.UUID, user_id: uuid.UUID):
         return await self.repository.get_margin(margin_id, user_id)
 
@@ -690,3 +864,27 @@ def _margin_warnings(result) -> list[AnalyticalWarning]:
     return [
         AnalyticalWarning.warn(code, messages.get(code, code)) for code in codes if code in messages
     ]
+
+
+def _incremental_warnings(codes: tuple[str, ...]) -> list[AnalyticalWarning]:
+    """The caveats that belong to the comparison rather than to either side.
+
+    Kept apart from ``_result_warnings`` because these are properties of running
+    one estimator twice, not of the estimator, and a reader needs to be told
+    that the sample both sides were measured on is a single shared one.
+    """
+    messages = {
+        IncrementalWarning.SHARED_PANEL: (
+            "Both sides were measured over one factor panel built from the "
+            "combined book, so the difference is the order's contribution and "
+            "not the difference between two samples."
+        ),
+        IncrementalWarning.ORDER_ON_A_NEW_UNDERLYING: (
+            "This order is on an underlying the portfolio does not hold. Its "
+            "factor history joins the panel, which can shorten the aligned "
+            "sample that the *current* book is measured on as well. The "
+            "alternative — a panel per side — would put that change inside the "
+            "difference attributed to the order."
+        ),
+    }
+    return [AnalyticalWarning.info(code, messages[code]) for code in codes if code in messages]

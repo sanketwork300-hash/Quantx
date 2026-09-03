@@ -17,6 +17,7 @@ a forward for the December expiry" is information the user needs.
 
 from __future__ import annotations
 
+import math
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -37,6 +38,7 @@ from domains.derivatives.models import (
     SmileExclusion,
     SmileSlice,
 )
+from domains.derivatives.surface import ReferencePoint
 from domains.derivatives.timeconv import ExpiryPolicy, time_to_expiry
 from domains.instruments.enums import OptionType
 from domains.market_data.curves import YieldCurve
@@ -595,3 +597,95 @@ def _with(point: ImpliedVolPoint, **changes) -> ImpliedVolPoint:
     from dataclasses import replace
 
     return replace(point, **changes)
+
+
+def invert_one_quote(quote: QuoteInput, reference: ReferencePoint) -> ImpliedVolPoint:
+    """One quote's implied volatility, at the forward the surface was fitted at.
+
+    Phase 11 needs a single contract's market implied volatility inside a
+    snapshot that was assembled for something else, and it must be comparable
+    with that surface's reference volatility. Using a forward computed from spot
+    and a carry assumption would make the difference between the two partly a
+    difference of forward convention, which is exactly the kind of invisible
+    disagreement the surface's own fitted forward exists to avoid.
+
+    A quote that cannot be inverted comes back as a point that says so, with
+    ``market_iv`` absent. It is never filled in from the reference: that would
+    make the deviation identically zero and look like agreement.
+    """
+    tau = reference.time_to_expiry
+    forward = reference.forward
+    discount = reference.discount_factor
+    if tau is None or tau <= 0 or forward is None or forward <= 0:
+        return ImpliedVolPoint(
+            instrument_id=quote.instrument_id,
+            expiry=quote.expiry,
+            strike=quote.strike,
+            option_type=quote.option_type,
+            price_used=None,
+            price_source=PriceSource.NONE,
+            market_iv=None,
+            error="the surface produced no forward or maturity for this contract",
+            data_quality_score=quote.quality_score,
+            liquidity_score=quote.liquidity_score,
+            weight=quote.weight,
+        )
+
+    mid = quote.mid_price
+    if mid is not None:
+        price, source = float(mid), PriceSource.MID
+    elif quote.last_price is not None and quote.last_price > 0:
+        price, source = float(quote.last_price), PriceSource.LAST
+    else:
+        price, source = float("nan"), PriceSource.NONE
+
+    is_call = quote.option_type is OptionType.CALL
+    discount = 1.0 if discount is None else float(discount)
+
+    def solve(value: float, resolution: float | None) -> object:
+        batch = implied_vol_black76_batch(
+            np.array([value]),
+            np.array([forward]),
+            np.array([float(quote.strike)]),
+            np.array([tau]),
+            np.array([is_call]),
+            np.array([discount]),
+            price_resolution=(None if resolution is None else np.array([resolution], dtype=float)),
+        )
+        return batch.at(0)
+
+    result = solve(price, quote.price_resolution)
+    spread = (
+        float(quote.ask_price - quote.bid_price)
+        if quote.ask_price is not None and quote.bid_price is not None
+        else None
+    )
+
+    def side(value: Decimal | None) -> float | None:
+        if value is None or value <= 0:
+            return None
+        return solve(float(value), None).implied_volatility
+
+    return ImpliedVolPoint(
+        instrument_id=quote.instrument_id,
+        expiry=quote.expiry,
+        strike=quote.strike,
+        option_type=quote.option_type,
+        price_used=None if math.isnan(price) else price,
+        price_source=source,
+        price_spread=spread,
+        market_iv=result.implied_volatility,
+        market_iv_bid=side(quote.bid_price),
+        market_iv_ask=side(quote.ask_price),
+        converged=result.converged,
+        iterations=result.iterations,
+        solver=result.solver or "none",
+        error=result.error,
+        vega=result.vega,
+        uncertainty=result.uncertainty,
+        data_quality_score=quote.quality_score,
+        liquidity_score=quote.liquidity_score,
+        time_to_expiry=tau,
+        log_moneyness=reference.log_moneyness,
+        weight=quote.weight,
+    )

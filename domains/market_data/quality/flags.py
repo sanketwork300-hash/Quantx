@@ -82,6 +82,20 @@ class QualityFlag:
             "context": self.context,
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict) -> QualityFlag:
+        """Rehydrate a stored flag.
+
+        Exact rather than lossy: a flag list read back with its codes dropped
+        would present as "no flags", which is a claim the row does not make.
+        """
+        return cls(
+            code=QualityCode(payload["code"]),
+            severity=Severity[str(payload["severity"])],
+            message=payload.get("message", ""),
+            context=dict(payload.get("context") or {}),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class MarketDataQuality:

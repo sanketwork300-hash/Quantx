@@ -1295,6 +1295,89 @@ counts conserve, and every rejected row carries its 1-based source row number
 and a closed-vocabulary reason — the complete list, in the object store, because
 it is unbounded and a column would have to truncate it.
 
+## 18b. Unified order analysis — Phase 11 (implemented)
+
+### The composition, and why it is the method
+
+There is no new estimator in this phase. Every number comes from an engine
+documented above, and the entire methodological content is that they all read
+one snapshot.
+
+A user asking what happens if they sell a contract is asking five questions, and
+the answers are only comparable if they were computed from the same market. The
+service builds one `ValuationContext` — covering the book's underlyings *and*
+the order's, so a contract on an underlying the portfolio does not hold yet is
+still valued inside the same snapshot — values the proposed position in it, and
+hands that context to every branch. The `market_state_id` appears in all five
+provenance blocks. A difference between "current" and "proposed" is then the
+order's contribution, which is the only thing that makes it worth showing.
+
+### Valuing a position that does not exist
+
+The proposed position is constructed as a `Position` with an id derived from the
+contract and the size, is never written, and is valued by
+`PortfolioValuationService` against the caller's context — the same function,
+with the same anchors, that values a stored position. That is deliberate. It
+means `build_exposures` treats it identically, and that an order which cannot be
+repriced fails for the same reason, in the same closed vocabulary, as a stored
+position would.
+
+It carries no average price. An order that has not been placed has no cost, and
+an unrealised P&L measured against the limit price would be a number about a
+fill nobody got.
+
+### Incremental risk: one panel, one seed, one grid
+
+Both sides are measured by the same estimator, over a factor panel built once
+from the **combined** book, with the same seed where the method draws anything
+and the same shock grid for margin. Building a panel per side would let an order
+on a new underlying change the aligned sample that the current book is measured
+on, and the difference would then contain that change as well as the order. The
+cost of the choice — that adding such an order can shorten the sample for both
+sides — is reported as a warning on the branch rather than hidden.
+
+### The refusal that matters
+
+If the proposed contract has no volatility, no underlying level or no time to
+expiry, it never enters the combined book. Both sides are then literally the
+same object, every difference is exactly zero, and the analysis reads as an
+order that adds no risk. `CombinedBook.order_is_repriceable` records that fact,
+and the risk and margin branches return `FAILED` with the exclusion reason
+rather than the zeros.
+
+### The forward cost estimate
+
+The Phase 8 simulator walks a schedule against prices the market printed. A
+proposed order has no such path, so the reference price is held flat at the
+snapshot mid for the whole horizon and the estimate contains only the movement
+the order is modelled to cause. Everything else — permanent impact accumulating
+into the reference for later slices, temporary impact and half the quoted spread
+paid on the slice, the signed shortfall against the arrival reference — is the
+same convention, and a unit test asserts the two agree slice for slice on a flat
+path so there is one definition with two entry points.
+
+Two properties of the result are easy to misread and are stated in the payload:
+
+- **The two halves are known to different standards.** The spread half is
+  measured off an observed two-sided quote; the impact half is model output at a
+  coefficient that is almost certainly not this market's. Either can be absent,
+  and the total is absent whenever one of them is — a slippage figure quietly
+  omitting impact would read as a complete answer.
+- **Splitting an order does not obviously reduce its cost in this model.**
+  Permanent impact is evaluated per slice and accumulates, so it grows roughly
+  as the square root of the slice count while the temporary term falls. Which
+  dominates depends on coefficients nobody here has calibrated, and the output
+  therefore carries no argument for or against working an order.
+
+### What is measured about a limit price
+
+Only whether it would cross: marketable, passive, or unknown when there is no
+two-sided quote to decide against. A passive order's figures are explicitly
+conditional on it filling in full, and whether a resting order fills is not
+modelled. That needs the queue at the level, which is a gated microstructure
+capability most feeds cannot support — and splicing a bracketed queue estimate
+into a single cost figure would bury the gate that Phase 10 exists to enforce.
+
 ## 18. Known limitations
 
 1. European exercise only; American options on dividend-paying underlyings are
@@ -1339,3 +1422,12 @@ it is unbounded and a column would have to truncate it.
     not implemented; a scope covering several event types is fitted as one
     superposed process and labelled as such rather than being called "order
     flow".
+14. A unified order analysis holds the reference price flat over the execution
+    horizon, because a proposed order has no path. The estimate therefore
+    contains the movement the order is modelled to cause and none of the
+    movement a real window would have had anyway, which is the difference
+    between a cost estimate and a forecast.
+15. Nothing in an order analysis weighs its five branches against each other. A
+    single figure combining reference value, estimated slippage and margin
+    consumption would be a statement about someone's risk appetite, and the
+    platform does not have one; the branches are reported side by side.

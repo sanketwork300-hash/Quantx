@@ -123,7 +123,7 @@ POST /api/v1/instruments/resolve
 | GET | `/market/chains/{snapshot_id}` | **[P0]** | a specific historical chain snapshot |
 | GET | `/market/chains` | **[P0]** | list snapshots for an underlying |
 | GET | `/market/bars/{instrument_id}` | _(planned P1)_ | |
-| GET | `/market/orderbook/{instrument_id}` | _(planned P10)_ | |
+| GET | `/market/orderbook/{instrument_id}` | _(not planned)_ | a live book comes from a provider; Phase 10 works on **uploaded** L2 datasets, under `/microstructure` |
 | GET | `/market/state` | **[P2]** | timestamp-consistent snapshot; `?underlying_id=`, `?risk_free_rate=`, `?include_quotes=` |
 
 Chain response (abridged):
@@ -1081,20 +1081,71 @@ placed an order. A level at which nothing was observed to leave returns
 `FAILED` with the reason, rather than a probability of zero that would read as
 a statement about the order rather than about the data.
 
-## 13a. Unified order analysis _(planned — P11)_
+## 13a. Unified order analysis **[P11]**
 
 ```http
 POST /api/v1/order-analysis
 {"portfolio_id": "...", "instrument_id": "...", "side": "SELL",
- "quantity": "5000", "order_type": "LIMIT", "limit_price": "168.00"}
+ "quantity": "150", "order_type": "LIMIT", "limit_price": "168.00",
+ "risk_free_rate": 0.065, "settlement_time_utc": "10:00:00",
+ "var_method": "HISTORICAL", "scenario": "Sell-off with volatility spike",
+ "execution": {"average_daily_volume": 500000, "volatility": 0.2,
+               "intervals": 6, "strategies": ["IMMEDIATE", "TWAP"]},
+ "margin": {"eligible_capital": 5000000}}
+
+GET /api/v1/order-analysis?portfolio_id=...
+GET /api/v1/order-analysis/{id}
 ```
 
-Returns valuation, surface deviation, execution cost estimate, and
-current -> proposed deltas for Greeks, VaR, stress loss and margin.
+Answered inline rather than as a job: it values one portfolio once and one extra
+contract once, and the expensive work — the surface calibration, the intensity
+fit — was done in earlier phases and is read, not redone.
+
+Five branches, under `results.branches`:
+
+| Branch | What it answers | Owned by |
+| --- | --- | --- |
+| `VALUATION` | the observed two-sided market, and a reference *range* across the models that could run, with the dispersion and a confidence whose contributions are listed | Phase 9 model consensus |
+| `SURFACE` | this contract's observed implied volatility against the fitted surface, with the bid/ask envelope, the explained scale and the historical z-score | Phase 3 anomaly scanner |
+| `EXECUTION` | estimated slippage per schedule against the snapshot mid, split into a spread half and an impact half | Phase 8 impact models |
+| `RISK` | Greeks, VaR and expected shortfall, and one scenario, for the book and for the book with the order in it | Phase 5 |
+| `MARGIN` | estimated margin, buffer and utilisation, before and after | Phase 6 |
+
+**Every branch reads one `MarketState`.** The same `market_state_id` appears in
+all five provenance blocks and in the envelope's, `results.market_state_ids`
+publishes the set so a client can check it without trusting the server's word,
+and a test asserts it has exactly one element. That is the point of the
+endpoint: the current-to-proposed differences are attributable to the order
+rather than to five calculations catching the market at five moments.
+
+**Branches degrade independently.** A branch that cannot compute is `FAILED`
+with its reason in its own `warnings`, the others still answer, and the envelope
+is `PARTIAL`. A branch is never silently dropped.
+
+**An order that cannot be repriced is refused, not scored zero.** If the
+proposed contract has no volatility, no underlying level or no time to expiry,
+it never enters the combined book, both sides of every comparison are identical
+and every difference is exactly zero — which would read as an order that adds no
+risk. The `RISK` and `MARGIN` branches return `FAILED` with
+`INCREMENTAL_ORDER_NOT_REPRICEABLE` and the exclusion reason instead.
+
+**Absences are absences.** With no `average_daily_volume` the impact half of the
+cost estimate is `null` and no total is stated — the spread half, which is
+measured off an observed quote, is still reported. With no two-sided market
+there is no reference price and the `EXECUTION` branch fails outright rather
+than substituting a last-trade print for a mid.
+
+**Whether a resting limit order fills is not modelled.** A limit price is
+classified against the touch it would have to cross (`MARKETABLE`, `PASSIVE` or
+`UNKNOWN`), and a passive order's figures are explicitly conditional on it
+filling in full. Fill probability needs the queue at the level, which is a gated
+microstructure capability and is not spliced in here.
 
 **This endpoint returns no recommendation field.** There is no `action`,
-`signal`, `rating` or `score` that could be read as advice. That is a contract
-guarantee, and a test asserts the response schema contains no such key.
+`signal`, `rating` or `score` that could be read as advice, the execution
+schedules are listed side by side rather than ranked, and the stored table has
+no column one could go in. That is a contract guarantee: a test walks the
+published OpenAPI schema and every key of a live response.
 
 ## 14. Pagination, sorting, idempotency
 

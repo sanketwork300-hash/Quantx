@@ -220,7 +220,16 @@ Consequences:
 
 Quotes inside a snapshot carry their own `exchange_timestamp`; the snapshot's
 `as_of` is the *decision* time. Staleness is measured per instrument, surfaced in
-`MarketDataQuality.stale_score`, and never silently repaired.
+`MarketDataQuality.stale_score`, and never silently repaired. The `quality` map
+carries the measurement made at ingestion, rehydrated with its flags intact — a
+consumer that needs to know how good a quote is reads the measurement that was
+made rather than making a second, divergent one.
+
+`/order-analysis` (§13a of the API document) is the contract's strongest test:
+five engines answer five different questions about one proposed order, and all
+five read the same `state_id`. The current-to-proposed differences a user reads
+are then attributable to the order, which is the only thing that makes them
+worth showing.
 
 ## 6. Observation vs. estimate (build spec §1.2)
 

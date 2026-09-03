@@ -11,6 +11,8 @@ export interface Provenance {
   computed_at: string;
   code_commit: string;
   market_state_timestamp: string | null;
+  /** The snapshot every number in this result was computed from. */
+  market_state_id: string | null;
   market_data_sources: string[];
   dataset_versions: Record<string, string>;
   model_versions: Record<string, string>;
@@ -1599,4 +1601,152 @@ export interface CapabilityReference {
   capability: string;
   measures: string[];
   requires: string;
+}
+
+// --------------------------------------------------------------- Phase 11
+/** A listing with its page metadata, as the instrument routes return it. */
+export interface Listing<T> {
+  items: T[];
+  meta: { limit: number; offset: number; count: number };
+}
+
+/** The one snapshot every branch of an order analysis reads. */
+export interface MarketStateOut {
+  state_id: string;
+  as_of_timestamp: string;
+  counts: {
+    quotes: number;
+    spot_prices: number;
+    yield_curves: number;
+    volatility_surfaces: number;
+  };
+  sources: string[];
+  dataset_versions: Record<string, string>;
+}
+
+/**
+ * One quantity, before and after the proposed order. `change` is derived by
+ * the server from the two sides; there is no field for a change that was not
+ * computed as a difference.
+ */
+export interface Movement {
+  name: string;
+  unit: string;
+  current: number | null;
+  proposed: number | null;
+  change: number | null;
+}
+
+export interface ObservedMarket {
+  available: boolean;
+  reason?: string;
+  bid?: string | null;
+  ask?: string | null;
+  mid?: string | null;
+  last?: string | null;
+  spread?: string | null;
+  exchange_timestamp?: string;
+  age_seconds?: number | null;
+  source?: string;
+  quality?: Quality | null;
+  note?: string;
+}
+
+export interface StrategyCostOut {
+  strategy: string;
+  impact_model: string | null;
+  slices: number;
+  average_fill_price: string;
+  estimated_slippage_per_unit: string | null;
+  estimated_slippage_currency: number | null;
+  estimated_slippage_basis_points: number | null;
+  spread_component_currency: number | null;
+  impact_component_currency: number | null;
+  peak_participation: number | null;
+  assumptions: string[];
+  warnings: string[];
+}
+
+export interface OrderCostOut {
+  model_version: string;
+  side: string;
+  quantity: string;
+  currency: string;
+  reference_price: string;
+  quoted_spread: string | null;
+  marketability: "MARKETABLE" | "PASSIVE" | "UNKNOWN";
+  marketability_basis: string;
+  strategies: StrategyCostOut[];
+  unavailable: { strategy: string; reason: string }[];
+  assumptions: string[];
+  warnings: string[];
+  caveat: string;
+  interpretation: string;
+  observed: ObservedMarket;
+}
+
+/** One engine's answer, or the stated reason there is not one. */
+export interface OrderBranch<T> {
+  branch: string;
+  status: ResultStatus;
+  results: T | null;
+  warnings: AnalyticalWarning[];
+  provenance: Provenance;
+}
+
+export interface OrderAnalysisResults {
+  model_version: string;
+  order_analysis_id: string;
+  order: {
+    portfolio_id: string;
+    instrument_id: string;
+    canonical_key: string;
+    asset_class: string;
+    side: string;
+    quantity: string;
+    signed_quantity: string;
+    order_type: string;
+    limit_price: string | null;
+    multiplier: string;
+    currency: string;
+    proposed_position_id: string;
+  };
+  market_state: MarketStateOut;
+  branch_status: Record<string, ResultStatus>;
+  branches: {
+    VALUATION: OrderBranch<Record<string, unknown>>;
+    SURFACE: OrderBranch<Record<string, unknown>>;
+    EXECUTION: OrderBranch<OrderCostOut>;
+    RISK: OrderBranch<{
+      book: Record<string, unknown>;
+      greeks: { movements: Movement[] };
+      value_at_risk: { method: string; movements: Movement[] } | null;
+      stress: { scenario: string; movements: Movement[] } | null;
+    }>;
+    MARGIN: OrderBranch<{
+      model: string;
+      movements: Movement[];
+      disclaimer: string;
+    }>;
+  };
+  counts: { ok: number; failed: number };
+  interpretation: string;
+}
+
+export interface OrderAnalysisSummary {
+  id: string;
+  portfolio_id: string;
+  instrument_id: string;
+  side: string;
+  quantity: string;
+  order_type: string;
+  limit_price: string | null;
+  as_of_timestamp: string | null;
+  market_state_id: string | null;
+  base_currency: string | null;
+  status: ResultStatus;
+  branches_ok: number;
+  branches_failed: number;
+  branch_status: Record<string, ResultStatus>;
+  created_at: string;
 }

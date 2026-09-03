@@ -33,6 +33,7 @@ export default function RootLayout({
                 <div className="group">Portfolio</div>
                 <Link href="/portfolios">Portfolios</Link>
                 <Link href="/scenarios">Scenarios</Link>
+                <Link href="/order-analysis">Order analysis</Link>
                 <div className="group">Execution</div>
                 <Link href="/execution">Trade analysis</Link>
                 <Link href="/execution/simulate">Simulation</Link>

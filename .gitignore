@@ -16,3 +16,6 @@ web/.next/
 .coverage
 htmlcov/
 web/tsconfig.tsbuildinfo
+
+# setuptools build artefact from `pip install -e .`
+*.egg-info/

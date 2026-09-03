@@ -312,6 +312,25 @@ All five branches read the **same** `MarketState`. That is the entire point of
 the snapshot abstraction: the delta shown to the user is attributable to the
 order, not to the market moving between five independent calculations.
 
-Branches degrade independently. If surface calibration failed, the response is
-`PARTIAL` with the surface block `null` and a warning; valuation, execution,
-risk and margin still return.
+Branches degrade independently. If surface calibration failed, that branch is
+`FAILED` with its reason and the envelope is `PARTIAL`; execution, risk and
+margin still return.
+
+Three things the shipped implementation does that the sketch above does not say.
+
+**The proposed position is valued by the code that values a stored one.** It is
+built as a `Position` with a derived id, never written, and passed through
+`PortfolioValuationService` against the context the book was valued in. That is
+what lets `build_exposures` treat it identically, and what makes an order that
+cannot be repriced fail for the same reason and in the same vocabulary a stored
+position would.
+
+**A zero difference has to mean a zero difference.** An order that could not be
+repriced never enters the combined book, so both sides are identical and every
+delta is exactly zero. `CombinedBook.order_is_repriceable` records that, and the
+risk and margin branches refuse rather than report the zeros.
+
+**One factor panel, not two.** It is built over the *combined* book and used for
+both sides, because building one per side would let a new underlying change the
+sample the current book is measured on, and the difference would then contain
+that change as well as the order.

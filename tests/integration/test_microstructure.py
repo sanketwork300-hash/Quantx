@@ -536,9 +536,7 @@ class TestIntensity:
             results["predictive_test"]["statistic"] > results["predictive_test"]["critical_value"]
         )
 
-    async def test_the_result_carries_the_digest_of_the_data_it_was_fitted_to(
-        self, fitted
-    ):
+    async def test_the_result_carries_the_digest_of_the_data_it_was_fitted_to(self, fitted):
         assert len(fitted["provenance"]["dataset_versions"]["dataset"]) == 64
 
     async def test_the_verdict_is_a_held_out_test_not_an_in_sample_fit(self, fitted):

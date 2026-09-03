@@ -259,7 +259,9 @@ class SurfaceAnomalyScanner:
                 reference = surface.reference(point.strike, smile.expiry)
                 if not reference.ok:
                     continue
-                anomalies.append(self._score(point, reference, rmse, observations, policy, history))
+                anomalies.append(
+                    self.score_point(point, reference, rmse, observations, policy, history)
+                )
 
         return AnomalyScan(
             surface_id=surface.surface_id,
@@ -272,7 +274,7 @@ class SurfaceAnomalyScanner:
         )
 
     # ------------------------------------------------------------------ score
-    def _score(
+    def score_point(
         self,
         point: ImpliedVolPoint,
         reference: ReferencePoint,
@@ -281,6 +283,13 @@ class SurfaceAnomalyScanner:
         policy: AnomalyPolicy,
         history: dict[uuid.UUID, list[float]],
     ) -> SurfaceAnomaly:
+        """Score one quote against the surface.
+
+        Public because Phase 11 scores a single contract inside a unified order
+        analysis and must do it with *this* code rather than a second copy: two
+        implementations of the explained scale would disagree about what counts
+        as a deviation, and only one of them would be tested.
+        """
         market_iv = float(point.market_iv)
         reference_iv = float(reference.reference_iv)
         difference = market_iv - reference_iv

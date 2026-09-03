@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from domains.derivatives.anomaly import (
     ANOMALY_MODEL_VERSION,
     AnomalyPolicy,
+    SurfaceAnomaly,
     SurfaceAnomalyScanner,
 )
 from domains.derivatives.arbitrage import ArbitrageScope
@@ -50,6 +51,7 @@ from domains.derivatives.service import (
     ChainAnalysisService,
     DerivativesWarningCode,
     QuoteInput,
+    invert_one_quote,
 )
 from domains.derivatives.surface import (
     SURFACE_MODEL,
@@ -74,9 +76,60 @@ from quant.volatility.implied import implied_vol_black76, implied_vol_bsm
 from quant.volatility.svi import SVIParameters
 from quant.volatility.svi_calibration import CalibrationStatus, SVICalibrationResult
 
+#: Why a single contract's surface deviation could not be measured.
+DEVIATION_NO_REFERENCE = "DEVIATION_NO_SURFACE_REFERENCE"
+DEVIATION_NO_MARKET_IV = "DEVIATION_NO_OBSERVED_IMPLIED_VOLATILITY"
+
 
 class AnalysisError(Exception):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class ContractDeviation:
+    """One contract measured against the surface, or the reason it was not."""
+
+    instrument_id: uuid.UUID
+    surface_id: str
+    reference: ReferencePoint
+    point: ImpliedVolPoint | None
+    anomaly: SurfaceAnomaly | None
+    policy: AnomalyPolicy
+    warnings: tuple[AnalyticalWarning, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return self.anomaly is not None
+
+    def to_dict(self) -> dict:
+        return {
+            "instrument_id": str(self.instrument_id),
+            "surface_id": self.surface_id,
+            "reference_point": self.reference.to_dict(),
+            "observed": (
+                {
+                    "market_iv": self.point.market_iv,
+                    "market_iv_bid": self.point.market_iv_bid,
+                    "market_iv_ask": self.point.market_iv_ask,
+                    "price_used": self.point.price_used,
+                    "price_source": str(self.point.price_source),
+                    "price_spread": self.point.price_spread,
+                    "iv_uncertainty": self.point.uncertainty,
+                    "converged": self.point.converged,
+                }
+                if self.point is not None
+                else None
+            ),
+            "deviation": self.anomaly.to_dict() if self.anomaly is not None else None,
+            "policy": self.policy.to_provenance(),
+            "warnings": [warning.to_dict() for warning in self.warnings],
+            "interpretation": (
+                "A surface deviation is a measurement of disagreement between "
+                "this contract's observed implied volatility and the volatility "
+                "the fitted surface implies at the same strike and expiry. It is "
+                "not a claim that either one is wrong, and it is not a signal."
+            ),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -611,6 +664,117 @@ class DerivativesService:
         ]
 
     # ------------------------------------------------------ anomaly scanning
+    async def contract_deviation(
+        self,
+        instrument,
+        quote,
+        quality,
+        surface: VolatilitySurface,
+        policy: AnomalyPolicy | None = None,
+    ) -> ContractDeviation:
+        """Score one contract's observed volatility against a fitted surface.
+
+        Phase 11. The chain scanner does this for a whole chain; a unified order
+        analysis needs it for the one contract being traded, inside a snapshot
+        that was assembled for the whole book. It goes through
+        ``SurfaceAnomalyScanner.score_point`` rather than a second scoring rule,
+        so a deviation flagged here and a deviation flagged by a chain scan mean
+        the same thing.
+
+        Every absence is an absence with a reason: no surface reference, no
+        two-sided quote, or a price that would not invert. None of them is
+        reported as a deviation of zero.
+        """
+        policy = policy or AnomalyPolicy()
+        warnings: list[AnalyticalWarning] = []
+        reference = surface.reference(instrument.strike, instrument.expiry, instrument.option_type)
+
+        if not reference.ok:
+            warnings.append(
+                AnalyticalWarning.warn(
+                    DEVIATION_NO_REFERENCE,
+                    "The fitted surface produced no reference volatility for this "
+                    f"contract: {reference.error or reference.method}. There is "
+                    "nothing to measure the market against.",
+                    method=str(reference.method),
+                )
+            )
+            return ContractDeviation(
+                instrument_id=instrument.id,
+                surface_id=surface.surface_id,
+                reference=reference,
+                point=None,
+                anomaly=None,
+                policy=policy,
+                warnings=tuple(warnings),
+            )
+
+        quote_input = QuoteInput(
+            instrument_id=instrument.id,
+            expiry=instrument.expiry,
+            strike=instrument.strike,
+            option_type=instrument.option_type,
+            bid_price=quote.bid_price if quote else None,
+            ask_price=quote.ask_price if quote else None,
+            last_price=quote.last_price if quote else None,
+            spread_score=quality.spread_score if quality else 1.0,
+            liquidity_score=quality.liquidity_score if quality else 1.0,
+            quality_score=quality.overall_score if quality else 1.0,
+            tick_size=instrument.tick_size,
+        )
+        point = invert_one_quote(quote_input, reference)
+
+        if point.market_iv is None or not point.converged:
+            warnings.append(
+                AnalyticalWarning.warn(
+                    DEVIATION_NO_MARKET_IV,
+                    "This contract has no observed price that inverts to an implied "
+                    "volatility, so its deviation from the surface is not reported. "
+                    "It is absent, not zero.",
+                    reason=str(point.error) if point.error else "no two-sided quote",
+                )
+            )
+            return ContractDeviation(
+                instrument_id=instrument.id,
+                surface_id=surface.surface_id,
+                reference=reference,
+                point=point,
+                anomaly=None,
+                policy=policy,
+                warnings=tuple(warnings),
+            )
+
+        slice_fit = surface.slice_for(instrument.expiry)
+        rmse = (
+            slice_fit.calibration.rmse_vol_points / 100.0
+            if slice_fit is not None and slice_fit.calibration.rmse_vol_points is not None
+            else None
+        )
+        observations = slice_fit.calibration.n_observations if slice_fit is not None else 0
+        history = await self.repository.deviation_history([instrument.id])
+
+        anomaly = SurfaceAnomalyScanner().score_point(
+            point, reference, rmse, observations, policy, history
+        )
+        if not anomaly.historical_observations:
+            warnings.append(
+                AnalyticalWarning.info(
+                    "ANOMALY_NO_HISTORY",
+                    "No prior scan holds a deviation for this contract, so the "
+                    "difference below is measured only against what today's market "
+                    "width, fit error and measurement resolution can explain.",
+                )
+            )
+        return ContractDeviation(
+            instrument_id=instrument.id,
+            surface_id=surface.surface_id,
+            reference=reference,
+            point=point,
+            anomaly=anomaly,
+            policy=policy,
+            warnings=tuple(warnings),
+        )
+
     async def scan_anomalies(
         self,
         user_id: uuid.UUID,

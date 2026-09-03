@@ -26,6 +26,7 @@ from domains.market_data.ingestion.pipeline import (
 )
 from domains.market_data.orm import OptionChainSnapshotORM, OptionQuoteORM, UploadORM
 from domains.market_data.quality.config import MarketDataQualityConfig
+from domains.market_data.quality.flags import MarketDataQuality, QualityFlag
 from domains.market_data.repository import MarketDataRepository
 from domains.reports.envelope import AnalyticalResult
 from infrastructure.settings import Settings
@@ -315,7 +316,11 @@ class MarketDataService:
                     volume=row.volume,
                     open_interest=row.open_interest,
                     sequence_number=row.sequence_number,
-                )
+                ),
+                # The quality measured at ingestion travels with the snapshot,
+                # so a consumer that needs to know how good a quote is reads the
+                # measurement that was made rather than making a second one.
+                quality=_quality_of(row),
             )
 
         if risk_free_rate is not None:
@@ -411,3 +416,16 @@ def _jsonable(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
+
+
+def _quality_of(row) -> MarketDataQuality:
+    """Rehydrate the quality measured when the quote was ingested."""
+    return MarketDataQuality(
+        stale_score=row.stale_score,
+        spread_score=row.spread_score,
+        liquidity_score=row.liquidity_score,
+        consistency_score=row.consistency_score,
+        completeness_score=row.completeness_score,
+        overall_score=row.overall_score,
+        flags=tuple(QualityFlag.from_dict(item) for item in (row.quality_flags or ())),
+    )

@@ -89,11 +89,17 @@ QIP is an analytics platform and does not place orders.
 ### ABIDES — `jpmorganchase/abides-jpmc-public` (and `abides-sim/abides`)
 Licence: **verify before use.**
 
-`ADAPT CONCEPTS FROM` (Phase 10, research only) — discrete-event exchange
-simulation, agent populations, configurable latency. Deliberately **not** an MVP
-runtime dependency: a full agent-based market simulator is an order of magnitude
-more machinery than counterfactual TCA needs, and coupling the web platform to it
+`ADAPT CONCEPTS FROM` (research only) — discrete-event exchange simulation,
+agent populations, configurable latency. Deliberately **not** an MVP runtime
+dependency: a full agent-based market simulator is an order of magnitude more
+machinery than counterfactual TCA needs, and coupling the web platform to it
 would make the common case pay for the rare one.
+
+**Still not adopted after Phase 10.** Microstructure as shipped *measures*
+recorded books and tapes; it does not simulate a market. Nothing in it needs an
+agent population, and a simulator would produce microstructure that describes
+its own agents rather than a market — the same category error `docs/risks.md`
+R1 rules out for synthetic data.
 
 ### Riskfolio-Lib — `dcajasn/Riskfolio-Lib`
 Licence: BSD-3-Clause.
@@ -359,6 +365,26 @@ Format per build spec §96.
 **Reference implementation:** Apache Parquet via `pyarrow`
 **Decision:** `USE DIRECTLY`
 **Rationale:** a file format is data, not mathematics. Depth snapshots and event tapes grow with market activity rather than user activity, and the access pattern is analytical, so they live in the object store as parquet rather than in PostgreSQL. Prices and quantities are `decimal128(38, 12)` so a stored observation is not quietly re-rounded, and levels are list columns rather than a fixed width because a padded level is indistinguishable from a level quoted at zero
+
+---
+
+**Feature:** Forward order-cost estimate
+**Academic reference:** none new — it is the Phase 8 slice-walking convention applied to a window that has not happened yet, over the Phase 8 impact models
+**Reference implementation:** none adopted
+**Decision:** `IMPLEMENT INDEPENDENTLY`
+**Reused conceptually:** nothing beyond the platform's own Phase 7 and 8 work: the same permanent/temporary split, the same half-spread charge per slice, the same signed shortfall convention against an arrival reference
+**Implemented independently:** a walk that holds the reference price flat because a proposed order has no path, an `IMMEDIATE` single-slice schedule as the point of comparison every worked schedule is measured against, a marketability classification of a limit price against the touch it would have to cross, and a split of the estimate into a spread half measured off an observed two-sided quote and an impact half that is model output — either of which can be absent, and the total is absent whenever one of them is
+**Why not reuse the simulator:** it needs a path, and there is not one. Feeding it a single synthetic observation would have produced coverage warnings about missing data when the flatness is by construction, which is a different statement. `tests/unit/test_order_cost.py` instead asserts that the two agree slice for slice on a flat path, so the convention has one definition and two entry points
+**Known limitations:** the reference is held flat, so the estimate contains only the movement the order is modelled to cause and none of the movement a real window would have anyway. Permanent impact is evaluated per slice and accumulates, so splitting an order raises it roughly as the square root of the slice count while lowering the temporary term — which of the two dominates depends on coefficients this platform has not calibrated, and nothing in the output argues for or against working an order. Whether a resting limit order fills is not modelled at all: that needs the queue at the level, which is a gated microstructure capability and is deliberately not spliced in here
+
+---
+
+**Feature:** Incremental risk and margin
+**Academic reference:** none — this is a difference of two runs of engines documented above, not a new estimator
+**Reference implementation:** none adopted
+**Decision:** `IMPLEMENT INDEPENDENTLY`
+**Implemented independently:** a combined exposure set that appends the proposed position's own exposure to the book's, built by exactly the code that builds a stored position's; one factor panel over the combined book used for *both* sides so the sample cannot differ between them; the same seed and the same shock grid on both sides; and a refusal when the proposed position could not be repriced, because the two sides would then be identical and every difference exactly zero
+**Known limitations:** the panel is built over the combined book, so an order on an underlying the book does not hold can shorten the aligned sample that the *current* book is measured on as well. That is stated in the branch's own warnings rather than hidden, and the alternative — one panel per side — would put that change inside the difference attributed to the order. Correlations are those of the platform's own short history, and adding a position on a new underlying does not add history for it
 
 ---
 

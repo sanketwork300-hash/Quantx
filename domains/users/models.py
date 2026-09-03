@@ -15,6 +15,9 @@ class AuditAction(StrEnum):
     INSTRUMENT_CREATED = "INSTRUMENT_CREATED"
     JOB_SUBMITTED = "JOB_SUBMITTED"
     JOB_CANCELLED = "JOB_CANCELLED"
+    #: A unified order analysis was run. Recorded because it is the one endpoint
+    #: that reads a whole portfolio and an unplaced order together.
+    ORDER_ANALYSED = "ORDER_ANALYSED"
 
 
 @dataclass(frozen=True, slots=True)

@@ -193,9 +193,38 @@ has placed an order. Depth snapshots and event tapes are parquet in the object
 store with prices as decimals, because a stored observation is a fact and the
 platform does not re-round a venue's ticks on the way to disk.
 
+**Phase 11 — unified order analysis.**
+The point of the previous ten. One proposed order, five engines — what the
+market shows and what the models say around it, whether the contract's implied
+volatility is out of line with the surface, what it is estimated to cost to
+execute, and what it does to the book's Greeks, VaR, stress loss and estimated
+margin — all computed from **one `MarketState`**, whose id appears in all five
+provenance blocks and is asserted by a test. That is the whole design: the
+current-to-proposed differences a user reads are attributable to their order and
+not to five calculations catching the market at five moments.
+
+Branches degrade independently and are never dropped: one that cannot answer is
+`FAILED` with its reason and the envelope is `PARTIAL`. An order that cannot be
+repriced is **refused rather than reported as a difference of zero**, which is
+the single worst sentence this endpoint could produce — it would read as an
+order that adds no risk. With no average daily volume the impact half of the
+cost estimate is absent rather than zero, and the spread half, measured off an
+observed quote, is still reported. Whether a resting limit order fills is not
+modelled at all; the order is only classified against the touch it would have to
+cross.
+
+**There is no recommendation field, and nowhere for one to go.** No action, no
+signal, no rating, no score, no ranking of the execution schedules, and no
+column in the stored table one could live in. Three tests enforce it: over every
+key of a live response, over the published OpenAPI schema, and over the whole
+serialised payload for forbidden phrasing.
+
 **Not shipped, on purpose:** American exercise, jump-diffusion and rough
 volatility, PCA on surface changes (gated on real history), Almgren-Chriss, and
-any calibrated impact coefficient. Also not shipped in microstructure: book
+any calibrated impact coefficient. Also not shipped in order analysis: a
+fill-probability model for a passive limit order, and any aggregation of the
+five branches into a single figure — the second is the recommendation field
+under another name. Also not shipped in microstructure: book
 reconstruction from an event tape, a multivariate Hawkes process, and an
 adverse-selection term in the queue model. Also not shipped: any margin model claiming
 to be a broker's or an exchange's, any short-option or concentration rate —

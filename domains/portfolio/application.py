@@ -5,12 +5,13 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, time
+from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.instruments.service import InstrumentService
 from domains.market_data.ingestion.column_mapping import ColumnMapping, infer_mapping
-from domains.portfolio.enums import PositionSource
+from domains.portfolio.enums import PositionSide, PositionSource
 from domains.portfolio.importer import (
     IMPORT_MODEL_VERSION,
     POSITION_FIELDS,
@@ -19,7 +20,7 @@ from domains.portfolio.importer import (
     PositionImporter,
     commit_instruments,
 )
-from domains.portfolio.models import PortfolioValuation
+from domains.portfolio.models import PortfolioValuation, Position
 from domains.portfolio.repository import PortfolioRepository
 from domains.portfolio.service import PortfolioNotFound, PortfolioService
 from domains.portfolio.valuation import (
@@ -31,6 +32,12 @@ from domains.reports.envelope import AnalyticalResult
 from domains.reports.provenance import Provenance
 from domains.reports.warnings import AnalyticalWarning
 from infrastructure.settings import Settings
+
+#: Fixed namespace for the synthetic id a proposed position carries. Derived
+#: from the contract and the size rather than drawn at random, so the same
+#: hypothetical order analysed twice is the same position both times and the
+#: analysis is reproducible.
+PROPOSED_POSITION_NAMESPACE = uuid.UUID("4c56fb6c-4a7e-4c7f-936a-24a37160aafa")
 
 
 class PortfolioApplicationError(Exception):
@@ -76,6 +83,20 @@ class ComputedValuation:
     context: ValuationContext
     valuation: PortfolioValuation
     warnings: tuple[AnalyticalWarning, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ProposedPositionValuation:
+    """One hypothetical position, valued inside somebody else's snapshot."""
+
+    position: Position
+    instrument: object
+    valuation: PortfolioValuation
+    warnings: tuple[AnalyticalWarning, ...] = ()
+
+    @property
+    def position_valuation(self):
+        return self.valuation.valuations[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,11 +235,17 @@ class PortfolioApplicationService:
         portfolio_id: uuid.UUID,
         params: ValuePortfolioParams,
         composer,
+        extra_underlyings: set[uuid.UUID] | None = None,
     ) -> ComputedValuation | None:
         """Value a portfolio without persisting anything.
 
         ``None`` means no market data was available for any underlying, which is
         a stateable outcome and not an exception.
+
+        ``extra_underlyings`` widens the snapshot beyond what the book itself
+        touches. Phase 11 uses it so that a proposed order on an underlying the
+        portfolio does not hold yet is valued inside the *same* snapshot as the
+        book, rather than against a second one taken a moment later.
         """
         portfolio = await self.portfolios.get(portfolio_id, user_id)
         if portfolio is None:
@@ -226,7 +253,7 @@ class PortfolioApplicationService:
 
         positions = await self.portfolios.positions(portfolio_id)
         instruments = {}
-        underlyings: set[uuid.UUID] = set()
+        underlyings: set[uuid.UUID] = set(extra_underlyings or ())
         for position in positions:
             instrument = await self.instruments.get(position.instrument_id)
             if instrument is None:
@@ -265,6 +292,48 @@ class PortfolioApplicationService:
             context=context,
             valuation=valuation,
             warnings=tuple(warnings),
+        )
+
+    async def value_proposed_position(
+        self,
+        portfolio_id: uuid.UUID,
+        instrument_id: uuid.UUID,
+        signed_quantity: Decimal,
+        context: ValuationContext,
+    ) -> ProposedPositionValuation:
+        """Value one position that does not exist, inside a snapshot that does.
+
+        The position is never written. It is valued by exactly the code that
+        values a stored one, against the ``ValuationContext`` the caller already
+        built — which is the whole point: a hypothetical valued against its own
+        snapshot could not be differenced against the book's.
+        """
+        instrument = await self.instruments.get(instrument_id)
+        if instrument is None:
+            raise PortfolioApplicationError(f"instrument {instrument_id} is not in the master")
+        if signed_quantity == 0:
+            raise PortfolioApplicationError("an order for nothing is not an order")
+
+        position = Position(
+            id=uuid.uuid5(PROPOSED_POSITION_NAMESPACE, f"{instrument_id}:{signed_quantity}"),
+            portfolio_id=portfolio_id,
+            instrument_id=instrument_id,
+            quantity=signed_quantity,
+            side=PositionSide.for_quantity(signed_quantity),
+            # No average price: an order that has not been placed has no cost,
+            # and an unrealised P&L computed against the limit price would be a
+            # number about a fill nobody got.
+            average_price=None,
+            source=PositionSource.MANUAL,
+        )
+        valuation = PortfolioValuationService().value(
+            portfolio_id, [position], {instrument.id: instrument}, context
+        )
+        return ProposedPositionValuation(
+            position=position,
+            instrument=instrument,
+            valuation=valuation,
+            warnings=tuple(self._valuation_warnings(valuation)),
         )
 
     async def persist_valuation(
