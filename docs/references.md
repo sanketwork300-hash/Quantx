@@ -326,16 +326,39 @@ Format per build spec §96.
 ---
 
 **Feature:** Order-book analytics
-**Academic reference:** standard microstructure literature; Stoikov (2018) on microprice
-**Implemented independently:** spread, depth, microprice, single- and multi-level imbalance, book slope
-**Known limitations:** requires genuine L2; snapshot-only feeds cannot support queue or intensity models
+**Academic reference:** standard microstructure literature; Stoikov (2018) on the microprice; Cont, Kukanov & Stoikov (2014) on order-book imbalance
+**Reference implementation:** none adopted
+**Decision:** `IMPLEMENT INDEPENDENTLY`
+**Implemented independently:** spread and relative spread, microprice and its tilt against the mid, single- and multi-level imbalance, geometrically weighted multi-level imbalance, book slope as a through-the-origin regression of cumulative depth on relative distance from the mid, depth concentration as a Herfindahl index, and the cost of walking the displayed book for a stated size
+**Known limitations:** these describe *displayed* liquidity only — hidden and iceberg quantity is invisible to a public feed, so every depth figure is a lower bound by an amount no feed states. The cost to trade is a measurement of one instant with nothing moving, not an impact model, and a size larger than the displayed depth is refused rather than extrapolated past the last level. Requires genuine L2: a snapshot-only feed supports these and cannot support queue or intensity models, which is why the two are separate capabilities in the gate rather than one "microstructure" switch
 
 ---
 
-**Feature:** Queue position and Hawkes intensity
-**Academic reference:** Hawkes (1971); Bacry, Mastromatteo & Muzy (2015) survey
-**Decision:** gated — not implemented until event-level add/cancel/modify/execute data with sequencing exists, and only if it beats a Poisson baseline out-of-sample
-**Known limitations:** without exchange-level queue information, position can only ever be probabilistic, and will be reported as such
+**Feature:** Arrival intensity, and the Poisson-versus-Hawkes decision
+**Academic reference:** Hawkes (1971) for the self-exciting process; Ogata (1981) for the thinning simulation and the likelihood recursion; Bacry, Mastromatteo & Muzy (2015) survey; Diebold & Mariano (1995) for the predictive-accuracy test; Newey & West (1987) for the HAC variance
+**Reference implementation:** none adopted; `tick` and `hawkeslib` were not wrapped
+**Decision:** `IMPLEMENT INDEPENDENTLY`
+**Reused conceptually:** the exponential kernel and Ogata's linear-time recursion for the intensity at each event
+**Implemented independently:** the exponential-kernel likelihood with a blocked vectorisation of the recursion that stays finite over windows far longer than the decay; a `(log mu, logit n, log beta)` parametrisation that makes stationarity structural rather than checked afterwards; deterministic multi-start L-BFGS-B; a time-rescaling KS diagnostic; and the held-out comparison that decides which model is reported at all
+**Why not a library:** the fit is the easy half. What this phase needed was the *decision procedure* — a train/test split by time, the training events carried in as history, a per-event decomposition of the held-out likelihood, and a one-sided test on its mean — and no library exposes that. A library would also have made the branching ratio a number to inspect after the fact rather than a constraint the optimiser could never leave
+**Known limitations:** univariate only. Trades exciting cancellations, and either side exciting the other, is a multivariate Hawkes process and is not implemented; a scope covering several event types is fitted as one superposed process and labelled as such. The exponential kernel is the simplest self-exciting form and cannot represent the power-law decay reported for some venues
+
+---
+
+**Feature:** Queue position
+**Academic reference:** Hawkes (1971) and the survey above for the arrival side; the queue arithmetic follows the standard FIFO-with-cancellations treatment in the microstructure literature
+**Reference implementation:** none adopted
+**Decision:** `IMPLEMENT INDEPENDENTLY`, gated
+**Implemented independently:** a bracketed outlook whose two ends are the two cancellation-priority assumptions a public feed cannot distinguish, sharing one departure-size unit so the ordering between them holds by construction; the gate that refuses it outright without priced, sided events, a complete monotone sequence and snapshots to read the resting size from
+**Known limitations:** **without exchange-level queue information, position can only ever be probabilistic, and is reported as such.** Displayed size only; strict FIFO assumed; departures modelled as a Poisson counting process, so event-size variance and arrival clustering are not modelled even when a Hawkes fit alongside it has been adopted. No adverse-selection term and no model of the order's own effect on the level it joins. A level at which nothing was observed to leave is refused rather than scored zero, because zero would read as a statement about the order rather than about the data
+
+---
+
+**Feature:** L2 storage
+**Academic reference:** none — this is a storage decision
+**Reference implementation:** Apache Parquet via `pyarrow`
+**Decision:** `USE DIRECTLY`
+**Rationale:** a file format is data, not mathematics. Depth snapshots and event tapes grow with market activity rather than user activity, and the access pattern is analytical, so they live in the object store as parquet rather than in PostgreSQL. Prices and quantities are `decimal128(38, 12)` so a stored observation is not quietly re-rounded, and levels are list columns rather than a fixed width because a padded level is indistinguishable from a level quoted at zero
 
 ---
 

@@ -1,7 +1,9 @@
 # Execution Intelligence
 
 Status: **transaction cost analysis and simulation implemented** (Phases 7-8).
-Microstructure is Phase 10. Methodology in `docs/methodology.md` §§15-16.
+Microstructure is Phase 10, and is implemented; see §7 below and
+`docs/methodology.md` §18a. Methodology for this document's own subject is in
+`docs/methodology.md` §§15-16.
 
 ---
 
@@ -246,15 +248,35 @@ inside the sentence that refuses to make one. The comparison also states that
 the differences between strategies are smaller than the uncertainty in an
 uncalibrated impact coefficient.
 
-## 7. Microstructure _(Phase 10, gated on data)_
+## 7. Microstructure _(Phase 10 — implemented, gated on data)_
 
 Spread, depth, microprice, order-book imbalance
 `OBI = (V_b - V_a) / (V_b + V_a)` and its weighted multi-level form, book slope,
-depth concentration, trade and cancellation intensity.
+depth concentration, cost to trade the displayed book, and trade and
+cancellation intensity. Definitions are in `docs/methodology.md` §18a; the
+conventions that have more than one form in circulation are written out there
+rather than implied.
 
-Queue position and Hawkes intensity are gated: they require event-level
-add/cancel/modify/execute data with reliable sequencing. Without it, queue
-position is unknowable and the platform says so instead of estimating one. When
-implemented, output is probabilistic (`expected_fill_probability`,
-`estimated_wait_time`, `estimated_queue_position`) and Hawkes must beat a Poisson
-baseline out-of-sample before it ships.
+The gating is real and it is checked once, at import, rather than being a note
+in the documentation. A dataset gets six capabilities, each granted or refused
+with a closed-vocabulary reason and the evidence the verdict was taken on, and a
+refused capability has no endpoint that will answer anyway. A snapshot-only
+export supports the book analytics above and cannot support anything that needs
+the messages between the snapshots — the changes a snapshot series implies are
+not the messages that caused them, and this platform does not reconstruct a book
+from a tape.
+
+Queue position ships as a **bracket**, not a number. Its two ends are the two
+cancellation-priority assumptions a public feed cannot distinguish, and the
+response says in its own words that it is not a claim about where any exchange
+has placed an order. It requires priced, sided events with a complete monotone
+sequence: a tape with a hole in it describes a different book, and nothing in a
+queue number would say so.
+
+Hawkes had to beat a Poisson baseline out of sample before it shipped, and it
+still has to on every dataset. Both models are fitted on a training window and
+scored on a held-out one, and the self-exciting fit is reported only when the
+*mean* per-event predictive gain clears its own Newey-West standard error. On
+genuinely Poisson arrivals the raw held-out total favours it about half the
+time by hundredths of a nat, which is why the test is on the mean rather than
+the total.

@@ -935,7 +935,153 @@ is recommended, and that the differences between them are smaller than the
 uncertainty in an uncalibrated impact coefficient. There is no `best_strategy`
 field, and a test asserts no such key exists.
 
-## 13. Unified order analysis _(planned — P11)_
+## 13. Microstructure **[P10]**
+
+Every analytical route here consults the dataset's stored availability report
+before it computes anything. A capability the data cannot support is a **422**
+carrying `capability`, `reason` and the `evidence` the verdict was taken on —
+never a number with a caveat. There is no `force` parameter, and a test scans
+the published schema for one.
+
+### What a dataset can be asked for
+
+```http
+GET /api/v1/microstructure/capabilities
+```
+
+Reference, and answerable before anything is uploaded: the six capabilities,
+what each unlocks and what each needs. A snapshot-only export cannot support a
+queue model however it is post-processed, and finding that out after the upload
+is a worse experience than reading it here.
+
+### Import
+
+Depth snapshots and event tapes are uploaded separately —
+`kind=BOOK_SNAPSHOTS` and `kind=BOOK_EVENTS` — and imported together as one
+dataset, because the two halves are assessed together for what they can
+support. Wide CSV and canonical parquet are both accepted; parquet is the one
+binary format the upload endpoint admits, and it is checked at both ends for
+the magic number rather than only at the head.
+
+```http
+POST /api/v1/microstructure/datasets/preview
+{"instrument_id": "...", "snapshot_upload_id": "...", "event_upload_id": "..."}
+```
+
+Writes nothing. Returns `detected_snapshot_columns` — the `BID_PX_1`-style
+level columns the importer recognised, level by level, plus everything it could
+not place — the inferred event mapping, per-bucket counts with a sample of the
+rejections, and the full availability report the dataset *would* get.
+
+The preview is mandatory for a reason sharper than usual: a book whose price and
+size columns were read the wrong way round parses cleanly and produces analytics
+that are wrong in every number and look entirely ordinary. The commit sends the
+detected mapping back, so what is imported is what was reviewed.
+
+```http
+POST /api/v1/microstructure/datasets
+{"instrument_id": "...", "name": "NIFTY ATM call, 30 minutes",
+ "snapshot_upload_id": "...", "event_upload_id": "...",
+ "snapshot_columns": { ... as returned by the preview ... }}
+202 {"job_id": "...", "status": "QUEUED"}
+```
+
+### Reading a dataset
+
+```http
+GET /api/v1/microstructure/datasets
+GET /api/v1/microstructure/datasets/{id}
+GET /api/v1/microstructure/datasets/{id}/capabilities
+GET /api/v1/microstructure/datasets/{id}/rejections
+```
+
+The detail route is `PARTIAL` whenever any capability was refused: an import
+that succeeded but cannot answer half of what the phase offers is not a
+complete answer to "what can I do with this?". `rows` conserves —
+`input == kept + rejected` on both halves — and `rejection_counts` accounts for
+every rejected row by reason. `/rejections` returns the **complete** list, each
+with its 1-based source row number and message, read from the object store
+because it is unbounded and a column would have to truncate it.
+
+`/capabilities` returns one verdict per capability with `available`, `reason`,
+a sentence saying what was missing, and the `evidence` it was decided on, so a
+refusal can be argued with rather than only obeyed.
+
+### Book analytics
+
+```http
+POST /api/v1/microstructure/datasets/{id}/analyze
+{"levels": 5, "weighted_decay": 0.5, "trade_sizes": [500]}
+202 {"job_id": "...", "status": "QUEUED"}
+
+GET /api/v1/microstructure/reports/{report_id}
+```
+
+Every snapshot is measured and the session is summarised by percentiles rather
+than a standard deviation — a session of books is not normal and a handful of
+auction instants own the variance. Each measure carries its `observations` and
+its `missing` count broken down by the reason the snapshots that had no such
+measurement did not, so `observations + missing` always equals
+`snapshots_analysed` and an average is never quietly over a subset nobody chose.
+
+`trade_costs` reports what walking the displayed book for a stated size would
+have cost. A size the book cannot absorb is counted under
+`snapshots_that_could_not` with a null slippage — the price beyond the last
+level is not in the book. The `note` on every entry states that this is one
+instant with nothing moving, and not an impact model.
+
+`series` is a subsample of the per-snapshot series spaced evenly across the
+window, so the chart is not a picture of the opening. The full series is parquet
+in the object store.
+
+### Arrival intensity
+
+```http
+POST /api/v1/microstructure/datasets/{id}/intensity
+{"event_types": ["CANCEL"], "side": "BID", "train_fraction": 0.7}
+202 {"job_id": "...", "status": "QUEUED"}
+
+GET /api/v1/microstructure/intensity
+GET /api/v1/microstructure/intensity/{model_id}
+```
+
+Both models are always returned. `hawkes_is_adopted` is the field to read
+before rendering any Hawkes parameter: when it is false those parameters
+describe a candidate the held-out test rejected, and `reason` says by how much
+it failed.
+
+`predictive_test` carries the decision — a one-sided Diebold-Mariano statistic
+on the per-event held-out predictive gain, with a Newey-West variance, against
+a stated `critical_value`. Raising `critical_value` makes the gate stricter;
+there is no value that disables it. The result is `PARTIAL` when the constant
+rate is what is reported, because the richer model was asked for and did not
+earn its place.
+
+### Queue outlook
+
+```http
+POST /api/v1/microstructure/datasets/{id}/queue
+{"side": "BID", "horizon_seconds": 300, "price": "444.00"}
+```
+
+Answered inline rather than as a job: it reads one level from one snapshot and
+counts the events at that price, and a user moving a price around should not
+have to poll for each answer.
+
+**The result is a bracket.** `estimated_fill_probability_range` and
+`estimated_wait_seconds_range` are the answer; the two ends differ only in
+whether cancellations at the level are assumed to remove size ahead of the
+order or behind it, which public data does not say. There is no single
+`fill_probability` at the top level of the response and no column that could
+hold one — a probability exists only inside a labelled end of the bracket.
+
+Every assumption travels in `assumptions`, and `interpretation` states in the
+response itself that this is not a claim about where any exchange has actually
+placed an order. A level at which nothing was observed to leave returns
+`FAILED` with the reason, rather than a probability of zero that would read as
+a statement about the order rather than about the data.
+
+## 13a. Unified order analysis _(planned — P11)_
 
 ```http
 POST /api/v1/order-analysis

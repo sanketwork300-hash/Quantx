@@ -587,14 +587,10 @@ def held_out_predictive_gains(
         if first == 0:
             carried = 0.0
         else:
-            carried = (excitation[first - 1] + 1.0) * math.exp(
-                -beta * (split - array[first - 1])
-            )
+            carried = (excitation[first - 1] + 1.0) * math.exp(-beta * (split - array[first - 1]))
         standing = np.concatenate(([carried], excitation[first:][:-1] + 1.0))
         gaps = np.diff(inside, prepend=split)
-        hawkes_compensator = mu * gaps + (alpha / beta) * standing * (
-            1.0 - np.exp(-beta * gaps)
-        )
+        hawkes_compensator = mu * gaps + (alpha / beta) * standing * (1.0 - np.exp(-beta * gaps))
         hawkes_intensity = mu + alpha * excitation[inside_mask]
         with np.errstate(divide="ignore"):
             hawkes_terms = np.log(hawkes_intensity) - hawkes_compensator
@@ -774,13 +770,16 @@ def compare_held_out(
     poisson_test = poisson_log_likelihood(array, split, end, poisson_rate)
     hawkes_test = hawkes_log_likelihood(array, split, end, hawkes_parameters)  # type: ignore[arg-type]
     predictive = predictive_comparison(
-        array, split, end, hawkes_parameters, poisson_rate, critical_value  # type: ignore[arg-type]
+        array,
+        split,
+        end,
+        hawkes_parameters,
+        poisson_rate,
+        critical_value,  # type: ignore[arg-type]
     )
 
     adopted = bool(
-        hawkes_train.converged
-        and math.isfinite(hawkes_test)
-        and predictive.is_significant
+        hawkes_train.converged and math.isfinite(hawkes_test) and predictive.is_significant
     )
     if not hawkes_train.converged:
         reason = (

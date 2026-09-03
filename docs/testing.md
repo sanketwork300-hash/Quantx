@@ -182,6 +182,32 @@ produce, which needs a different kind of test. Three shapes are used:
   `best_model`, `true_price`, `fair_value`, `recommendation` and `signal` are
   checked against every key at every depth of the serialised response.
 
+### Testing a gate
+
+Phase 10's central claim is a *negative* one — the self-exciting arrival model
+is reported only when it beat a constant rate on data it had not seen — and it
+needs a shape of test the others do not.
+
+- **Test the refusal, not only the acceptance.** `TestTheGate` fits the
+  comparison to five simulated self-exciting tapes and requires adoption, and
+  to ten genuinely Poisson tapes and requires refusal. The second half is the
+  one that matters: it is what stops the gate degenerating into a formality.
+- **Test that the threshold is doing work.** The first implementation compared
+  raw held-out totals and adopted the richer model seven times out of eight on
+  arrivals with no clustering whatsoever, by hundredths of a nat.
+  `test_a_raw_positive_total_is_not_enough_on_its_own` now sweeps thirty Poisson
+  tapes and asserts that at least one has a *positive* raw gain and is still
+  refused, so a regression to "read the sign of a difference" fails.
+- **Test that there is no way round it.** `test_there_is_no_parameter_that_
+  overrides_a_refusal` reads the published OpenAPI schema for every
+  microstructure path and asserts no `force`, `override`, `skip_gate` or
+  `ignore_availability` appears anywhere in it. An escape hatch added later has
+  to delete this test to land.
+- **Assert against the enums, not against a list.** The import tests compare the
+  set of reasons the fixtures triggered with `set(SnapshotRejection)` and
+  `set(EventRejection)` by equality, so a new rejection reason cannot be added
+  without a fixture row that produces it.
+
 ### Two invariants that exist to catch a future change
 
 A null scenario reprices to **exactly** the base value, and every scenario's
@@ -200,7 +226,6 @@ tests/data/options_chain_clean.csv        -> expected_ingestion_clean.json
 tests/data/options_chain_bad_quotes.csv   -> expected_ingestion_bad.json
 tests/data/portfolio_options.csv          -> expected_risk.json         (P4/P5)
 tests/data/trades.csv                     -> expected_tca.json          (P7)
-tests/data/orderbook.parquet              -> expected_microstructure.json (P10)
                                           -> expected_iv.json           (P1, planned)
                                           -> expected_svi.json          (P2)
 ```
@@ -209,6 +234,14 @@ A drift beyond the declared tolerance fails CI. Regenerating a golden file is a
 deliberate act: `python scripts/regen_golden.py --accept <name>` rewrites it and
 the diff must be reviewed and justified in the PR, alongside a model version
 bump if a formula changed.
+
+The Phase 10 fixtures — `orderbook_snapshots.csv`, `orderbook_events.csv` and
+`orderbook.parquet` — are deliberately **not** golden-filed. What would be
+pinned is the output of a maximum-likelihood fit, and a golden file would then
+fail on any change to scipy's optimiser for a reason that has nothing to do with
+this platform being right. They are asserted against instead: parameter recovery
+against the process that generated the tape, the likelihood against a quadrature
+of its own intensity, and the vectorised recursion against the plain one.
 
 ## 6. Tolerances
 

@@ -71,14 +71,27 @@ def _quantize(value: Decimal | None) -> Decimal | None:
     return None if value is None else value.quantize(_QUANTIZE)
 
 
-def _metadata(instrument_id: uuid.UUID, source: str, code_commit: str, rows: int) -> dict:
+def _metadata(
+    instrument_id: uuid.UUID,
+    source: str,
+    code_commit: str,
+    rows: int,
+    written_at: datetime | None = None,
+) -> dict:
+    """Key-value metadata, so a file found on its own is still identifiable.
+
+    ``written_at`` is a parameter rather than always ``now`` for one reason:
+    the committed test fixtures have to regenerate byte-identically, and a
+    wall-clock stamp in the footer would make every regeneration a diff. The
+    fixture generator passes a fixed instant; everything else takes the default.
+    """
     return {
         b"qip.storage_version": STORAGE_VERSION.encode(),
         b"qip.instrument_id": str(instrument_id).encode(),
         b"qip.source": source.encode(),
         b"qip.code_commit": code_commit.encode(),
         b"qip.rows": str(rows).encode(),
-        b"qip.written_at": datetime.now(UTC).isoformat().encode(),
+        b"qip.written_at": (written_at or datetime.now(UTC)).isoformat().encode(),
     }
 
 
@@ -97,6 +110,7 @@ def snapshots_to_parquet(
     instrument_id: uuid.UUID,
     source: str,
     code_commit: str,
+    written_at: datetime | None = None,
 ) -> bytes:
     """One row per snapshot, levels as list columns.
 
@@ -145,7 +159,7 @@ def snapshots_to_parquet(
         },
         schema=SNAPSHOT_SCHEMA,
     )
-    return _write(table, _metadata(instrument_id, source, code_commit, len(snapshots)))
+    return _write(table, _metadata(instrument_id, source, code_commit, len(snapshots), written_at))
 
 
 def events_to_parquet(
@@ -153,6 +167,7 @@ def events_to_parquet(
     instrument_id: uuid.UUID,
     source: str,
     code_commit: str,
+    written_at: datetime | None = None,
 ) -> bytes:
     table = pa.table(
         {
@@ -164,9 +179,7 @@ def events_to_parquet(
                 [event.receive_timestamp for event in events],
                 pa.timestamp("us", tz="UTC"),
             ),
-            "sequence_number": pa.array(
-                [event.sequence_number for event in events], pa.int64()
-            ),
+            "sequence_number": pa.array([event.sequence_number for event in events], pa.int64()),
             "event_type": pa.array([str(event.event_type) for event in events], pa.string()),
             "side": pa.array(
                 [str(event.side) if event.side else None for event in events], pa.string()
@@ -177,7 +190,7 @@ def events_to_parquet(
         },
         schema=EVENT_SCHEMA,
     )
-    return _write(table, _metadata(instrument_id, source, code_commit, len(events)))
+    return _write(table, _metadata(instrument_id, source, code_commit, len(events), written_at))
 
 
 def _as_utc(value) -> datetime | None:
@@ -300,9 +313,7 @@ class MicrostructureStore:
         )
         return key
 
-    async def put_rejections(
-        self, user_id: uuid.UUID, dataset_id: uuid.UUID, payload: dict
-    ) -> str:
+    async def put_rejections(self, user_id: uuid.UUID, dataset_id: uuid.UUID, payload: dict) -> str:
         """The complete rejection list, which is unbounded and so not a column.
 
         Counts by reason live on the dataset row; the per-row detail lives here,
@@ -334,9 +345,7 @@ class MicrostructureStore:
         key = self.series_key(user_id, report_id)
         sink = io.BytesIO()
         pq.write_table(table, sink, compression="zstd", version="2.6")
-        await self._store.put(
-            key, sink.getvalue(), content_type="application/vnd.apache.parquet"
-        )
+        await self._store.put(key, sink.getvalue(), content_type="application/vnd.apache.parquet")
         return key
 
     async def get_series(self, key: str) -> list[dict]:

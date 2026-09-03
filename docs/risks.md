@@ -18,8 +18,17 @@ including demos, CI and tutorials — functional with zero external data. No
 feature may be built such that it only works in provider mode.
 
 **Residual.** Anomaly z-scores and impact-model training need *history*, which
-synthetic data cannot substitute for. Phases 3, 10 and the ML impact model are
-explicitly gated on real historical data existing.
+synthetic data cannot substitute for. Phase 3's time-series analytics and the ML
+impact model remain explicitly gated on real historical data existing.
+
+**Phase 10 turned this risk into a mechanism.** Microstructure is the part of
+the platform most exposed to R1 — L2 and event tapes are the least available and
+most licence-encumbered data there is — so rather than assuming the data, it
+assesses it. Each dataset gets six capability verdicts at import, each with a
+reason and the evidence behind it, and a refused capability has no endpoint that
+will answer anyway. The residual risk that remains is not "we computed something
+from data that could not support it"; it is "the user has no data, and is told
+precisely which analytic that costs them and why".
 
 ## R2. Silent instrument mis-resolution  — **HIGH**
 

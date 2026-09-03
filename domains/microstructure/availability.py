@@ -311,8 +311,7 @@ def _cancellation_intensity(profile: DatasetProfile) -> CapabilityAssessment:
         return _refused(
             capability,
             AvailabilityRefusal.NO_EVENTS,
-            "This dataset holds no event tape, so cancellations cannot be "
-            "counted.",
+            "This dataset holds no event tape, so cancellations cannot be counted.",
             **evidence,
         )
     if cancels == 0:

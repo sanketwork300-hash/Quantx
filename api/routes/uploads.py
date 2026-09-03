@@ -149,6 +149,14 @@ async def ingest_upload(
             "POST /portfolios/{portfolio_id}/import/preview, then commit with "
             "POST /portfolios/{portfolio_id}/import.",
         )
+    if payload.kind in {UploadKind.BOOK_SNAPSHOTS, UploadKind.BOOK_EVENTS}:
+        raise BadRequest(
+            "WRONG_INGESTION_ROUTE",
+            "Depth snapshots and event tapes are imported as a microstructure "
+            "dataset, because the two halves are assessed together for what they "
+            "can support. Preview with POST /microstructure/datasets/preview, "
+            "then commit with POST /microstructure/datasets.",
+        )
     if payload.kind is not UploadKind.OPTION_CHAIN:
         raise BadRequest(
             "UNSUPPORTED_INGESTION_KIND",

@@ -31,6 +31,13 @@ from domains.reports.envelope import AnalyticalResult
 from infrastructure.settings import Settings
 from infrastructure.storage.base import ObjectStore
 
+#: Parquet's magic number, which both begins and ends a valid file. Parquet is
+#: the one binary format the platform accepts, because it is what an L2 capture
+#: pipeline writes and what the platform itself stores; it is a columnar data
+#: file with no macro or formula facility, which is what the binary rejection
+#: below exists to keep out.
+PARQUET_MAGIC = b"PAR1"
+
 #: Byte sequences that mark a file as something we will not parse as a table.
 #: Checked against the actual content, not the filename, because the filename is
 #: attacker-controlled and the content is what gets parsed.
@@ -125,6 +132,29 @@ class MarketDataService:
                 f"Extension {suffix!r} is not accepted. Allowed: "
                 f"{', '.join(settings.allowed_upload_extensions)}.",
             )
+
+        if data[:4] == PARQUET_MAGIC:
+            # A parquet file is binary and is not UTF-8 text, so it has to be
+            # admitted before the two checks below rather than excused after
+            # them. Both ends are checked: a file that merely starts with the
+            # magic number is not a parquet file, and admitting it would let
+            # arbitrary bytes past the binary rejection behind four characters
+            # anyone can type.
+            if len(data) < 8 or data[-4:] != PARQUET_MAGIC:
+                raise UploadRejected(
+                    "UPLOAD_PARQUET_TRUNCATED",
+                    "The file begins with the parquet magic number but does not "
+                    "end with it, so it is truncated or is not parquet. It is "
+                    "not parsed.",
+                )
+            if suffix != ".parquet":
+                raise UploadRejected(
+                    "UPLOAD_EXTENSION_DISAGREES_WITH_CONTENT",
+                    f"The content is parquet but the file is named {suffix!r}. "
+                    "The extension and the content have to agree, so that what "
+                    "is stored is what the name says.",
+                )
+            return
 
         head = data[:8]
         for signature in BINARY_SIGNATURES:

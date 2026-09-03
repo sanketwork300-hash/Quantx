@@ -43,7 +43,7 @@ class SnapshotRejection(StrEnum):
     NEGATIVE_QUANTITY = "NEGATIVE_QUANTITY"
     LEVELS_OUT_OF_ORDER = "LEVELS_OUT_OF_ORDER"
     PRICE_WITHOUT_QUANTITY = "PRICE_WITHOUT_QUANTITY"
-    DUPLICATE_TIMESTAMP = "DUPLICATE_TIMESTAMP"
+    DUPLICATE_OBSERVATION = "DUPLICATE_OBSERVATION"
 
 
 class EventRejection(StrEnum):
@@ -178,9 +178,7 @@ def sequencing_report(numbers: list[int | None]) -> SequencingReport:
             last=None,
         )
     distinct = set(present)
-    monotone = all(
-        later >= earlier for earlier, later in zip(present, present[1:], strict=False)
-    )
+    monotone = all(later >= earlier for earlier, later in zip(present, present[1:], strict=False))
     span = max(present) - min(present) + 1
     return SequencingReport(
         present=True,
@@ -233,12 +231,8 @@ class DatasetProfile:
             "kind": str(self.kind),
             "snapshots": self.snapshots,
             "events": self.events,
-            "first_timestamp": (
-                self.first_timestamp.isoformat() if self.first_timestamp else None
-            ),
-            "last_timestamp": (
-                self.last_timestamp.isoformat() if self.last_timestamp else None
-            ),
+            "first_timestamp": (self.first_timestamp.isoformat() if self.first_timestamp else None),
+            "last_timestamp": (self.last_timestamp.isoformat() if self.last_timestamp else None),
             "span_seconds": self.span_seconds,
             "two_sided_snapshots": self.two_sided_snapshots,
             "min_levels": self.min_levels,
@@ -313,9 +307,7 @@ def profile_dataset(
         first_timestamp=first,
         last_timestamp=last,
         span_seconds=span,
-        two_sided_snapshots=sum(
-            1 for snapshot in snapshots if snapshot.bids and snapshot.asks
-        ),
+        two_sided_snapshots=sum(1 for snapshot in snapshots if snapshot.bids and snapshot.asks),
         min_levels=min(level_counts) if level_counts else 0,
         median_levels=median,
         max_levels=max(level_counts) if level_counts else 0,
@@ -337,9 +329,7 @@ def profile_dataset(
         labelled_side_events=sum(1 for event in events if event.side is not None),
         priced_events=sum(1 for event in events if event.price is not None),
         tied_event_fraction=tied_fraction,
-        snapshot_sequencing=sequencing_report(
-            [snapshot.sequence_number for snapshot in snapshots]
-        ),
+        snapshot_sequencing=sequencing_report([snapshot.sequence_number for snapshot in snapshots]),
         event_sequencing=sequencing_report([event.sequence_number for event in events]),
     )
 

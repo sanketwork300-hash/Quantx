@@ -25,13 +25,24 @@ two, in the same spirit as the Phase 6 margin-shortfall region: the two rungs
 that locate the answer are reported alongside it, and nothing pretends to know
 where inside them it falls.
 
-**Method.** Departures at the level are treated as a Poisson counting process
-at the observed event rate, each removing the observed mean size. That is an
-approximation with two named costs: it ignores the variance of event sizes, and
-it ignores clustering in the arrivals — which is exactly what the Hawkes model
-in :mod:`quant.microstructure.intensity` is for, and why a queue estimate
-computed alongside an adopted Hawkes fit records that its own arrival model is
-the simpler one.
+**Method.** Departures at the level are treated as a Poisson counting process,
+consuming the queue in units of the mean size of an observed departure. The two
+ends differ only in *which* departures count toward that rate — trades alone,
+or trades and cancellations — and they share one size unit, computed over every
+observed departure. Sharing it is what makes the bracket a bracket: the
+optimistic departure stream contains the pessimistic one, so its volume rate is
+larger by construction, and with a common size unit the wait can only be
+shorter and the fill probability can only be higher. Giving each end its own
+mean size breaks that, and did: a level where five small cancellations
+accompany one large trade came out with the "optimistic" end *less* likely to
+fill, which is not a bracket but two unrelated numbers. The invariant is
+asserted on the object and again by a database CHECK.
+
+The approximation has two named costs: it ignores the variance of departure
+sizes, and it ignores clustering in the arrivals — which is exactly what the
+Hawkes model in :mod:`quant.microstructure.intensity` is for, and why a queue
+estimate computed alongside an adopted Hawkes fit records that its own arrival
+model is the simpler one.
 """
 
 from __future__ import annotations
@@ -121,6 +132,25 @@ class QueueOutlook:
     assumptions: tuple[str, ...]
     confidence: float
 
+    def __post_init__(self) -> None:
+        # The optimistic departure stream contains the pessimistic one, so it
+        # cannot fill more slowly. If it ever does, the model has stopped being
+        # a bracket and the object refuses to exist rather than being stored and
+        # read as two independent estimates.
+        if self.optimistic.fill_probability < self.pessimistic.fill_probability:
+            raise ValueError(
+                f"the optimistic end fills with probability "
+                f"{self.optimistic.fill_probability} against the pessimistic "
+                f"end's {self.pessimistic.fill_probability}; that is not a "
+                "bracket"
+            )
+        if self.optimistic.expected_wait_seconds > self.pessimistic.expected_wait_seconds:
+            raise ValueError(
+                f"the optimistic end waits {self.optimistic.expected_wait_seconds}s "
+                f"against the pessimistic end's "
+                f"{self.pessimistic.expected_wait_seconds}s; that is not a bracket"
+            )
+
     @property
     def fill_probability_range(self) -> tuple[float, float]:
         """``(pessimistic, optimistic)``. There is no single number here."""
@@ -166,11 +196,17 @@ class QueueOutlook:
 def _estimate(
     priority: CancellationPriority,
     quantity_ahead: float,
-    event_rate: float,
+    departure_rate: float,
     mean_event_size: float,
     horizon_seconds: float,
 ) -> QueueEstimate:
-    departure_rate = event_rate * mean_event_size
+    """One end of the bracket, from a volume rate and the shared size unit.
+
+    ``departure_rate`` is quantity per second, and it is the only thing that
+    differs between the two ends. Everything derived below is monotone in it,
+    which is what makes the pair a bracket rather than two numbers.
+    """
+    event_rate = departure_rate / mean_event_size
     if quantity_ahead <= 0.0:
         events_required = 0
         wait = 0.0
@@ -250,37 +286,33 @@ def estimate_queue_outlook(
             "event size to consume the queue with",
         )
 
-    trade_rate = trades_observed / observation_window_seconds
-    cancel_rate = cancels_observed / observation_window_seconds
-
-    if trades_observed > 0:
-        mean_trade_size = traded_quantity / trades_observed
-    else:
-        # Nothing traded here. The pessimistic end has no departures at all,
-        # which the estimate below turns into an infinite wait and a zero
-        # probability — the correct reading of "only cancellations were seen".
-        mean_trade_size = traded_quantity if traded_quantity > 0 else 1.0
-
-    both_events = trades_observed + cancels_observed
-    mean_both_size = (traded_quantity + cancelled_quantity) / both_events
+    departures = trades_observed + cancels_observed
+    # One size unit for both ends, over every observed departure. See the module
+    # docstring: giving each end its own mean size stops the pair being a
+    # bracket, because the end with more departures can have a smaller mean and
+    # so need more of them.
+    mean_event_size = (traded_quantity + cancelled_quantity) / departures
 
     optimistic = _estimate(
         CancellationPriority.CANCELS_AHEAD,
         quantity_ahead,
-        trade_rate + cancel_rate,
-        mean_both_size,
+        (traded_quantity + cancelled_quantity) / observation_window_seconds,
+        mean_event_size,
         horizon_seconds,
     )
     pessimistic = _estimate(
         CancellationPriority.CANCELS_BEHIND,
         quantity_ahead,
-        trade_rate,
-        mean_trade_size,
+        traded_quantity / observation_window_seconds,
+        mean_event_size,
         horizon_seconds,
     )
 
     assumptions = (
         "Queue priority is strict first-in-first-out at the price level.",
+        "The queue is consumed in units of the mean size of an observed "
+        "departure, the same unit at both ends of the bracket, so the two ends "
+        "differ only in which departures are counted.",
         "Only displayed size is counted; hidden and iceberg quantity is invisible "
         "to this feed and would sit ahead of the order without appearing here.",
         "Departures are modelled as a Poisson counting process at the observed "
@@ -300,10 +332,12 @@ def estimate_queue_outlook(
     #   * how much of the level's size the estimate could see
     #   * how many departure events the rates were measured from
     #   * how wide the bracket is, since a wide bracket is a weak answer
-    evidence = min(1.0, both_events / 30.0)
+    evidence = min(1.0, departures / 30.0)
     low, high = pessimistic.fill_probability, optimistic.fill_probability
     agreement = 1.0 - min(1.0, high - low)
-    coverage = 1.0 if level_quantity <= 0.0 else min(1.0, level_quantity / max(quantity_ahead, 1e-9))
+    coverage = (
+        1.0 if level_quantity <= 0.0 else min(1.0, level_quantity / max(quantity_ahead, 1e-9))
+    )
     confidence = float(evidence * agreement * min(coverage, 1.0))
 
     return QueueOutlook(

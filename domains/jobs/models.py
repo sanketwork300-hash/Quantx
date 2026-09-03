@@ -44,6 +44,9 @@ class JobType(StrEnum):
     SIMULATE_EXECUTION = "SIMULATE_EXECUTION"
     CALIBRATE_GLOBAL_SURFACE = "CALIBRATE_GLOBAL_SURFACE"
     PRICE_CONSENSUS = "PRICE_CONSENSUS"
+    IMPORT_BOOK_DATA = "IMPORT_BOOK_DATA"
+    ANALYZE_MICROSTRUCTURE = "ANALYZE_MICROSTRUCTURE"
+    FIT_INTENSITY = "FIT_INTENSITY"
     # Later phases register their types here; the enum is the contract between
     # the API, the worker and the frontend.
 

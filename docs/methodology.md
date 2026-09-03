@@ -1101,6 +1101,200 @@ A model that cannot run contributes a named unavailability, not a missing entry,
 and the reduced model count enters the confidence directly. Nothing is defaulted
 to make a model runnable.
 
+## 18a. Microstructure — Phase 10 (implemented)
+
+Everything in this section sits behind a **data-availability gate**, and the
+gate is the design rather than a precaution around it. Every other engine in
+the platform computes what it can and degrades with a warning; microstructure
+does not get that latitude, because its failure mode is different. A volatility
+surface fitted to thin data is visibly uncertain — wide confidence, few
+observations, a warning the reader sees. An order-book imbalance computed from a
+one-level feed, or a queue position inferred from a tape with holes in it, looks
+exactly like the real thing. There is nothing in the number that says otherwise.
+
+So a dataset is assessed once, at import, and the verdicts are stored with it.
+Each capability is `GRANTED` or `REFUSED`; a refusal carries a
+closed-vocabulary reason, a sentence saying what was missing, and the evidence
+it was decided on. There is no third state, no override parameter and no
+endpoint that will answer anyway.
+
+| Capability | What it unlocks | What it needs |
+| --- | --- | --- |
+| `TOP_OF_BOOK` | spread, mid, microprice, top-of-book imbalance | one snapshot with a price on both sides |
+| `DEPTH_ANALYTICS` | multi-level depth, weighted imbalance, book slope, concentration, cost to trade | snapshots with at least 2 levels per side |
+| `EVENT_INTENSITY` | arrival rate for a chosen event type | 70 events spanning at least 60 seconds |
+| `CANCELLATION_INTENSITY` | a cancellation rate, separate from the trade rate | 20 events *labelled* as cancellations |
+| `SELF_EXCITATION` | Hawkes branching ratio and excitation half-life | the above, with under 20% of consecutive events sharing a timestamp |
+| `QUEUE_POSITION` | bracketed queue position, wait and fill probability | priced, sided events with a complete monotone sequence, plus snapshots |
+
+The thresholds are stated, not tuned. Each is a point below which the
+measurement is not the measurement it claims to be: two levels because a slope
+through one point is an identity rather than a fit; a labelled cancellation
+before a cancellation rate, because deriving one from a size decrease between
+snapshots conflates a cancellation with a trade and those move a queue very
+differently; a timestamp resolution finer than the clustering, because a
+self-exciting model fitted to a one-second tape estimates the recording clock
+and reports it as market behaviour.
+
+### Definitions
+
+More than one convention is in circulation for several of these, so the ones
+used here are stated rather than implied.
+
+- **Microprice** `(b*Qa + a*Qb) / (Qb + Qa)`, weighted by the *opposite* side's
+  size, so a large resting bid pulls it toward the ask. Reported alongside a
+  `microprice_tilt` of `microprice - mid`, whose sign is the direction the
+  resting size leans.
+- **Imbalance** `(Qb - Qa) / (Qb + Qa)` over the top *n* levels: `+1` for an
+  all-bid book, `-1` for an all-ask book. A book with no resting size on either
+  side has *no* imbalance, which is not the same as a balanced one, and is
+  reported as absent rather than as zero.
+- **Weighted imbalance** the same, with geometric level weights
+  `w_i = exp(-decay * i)`. `decay = 0` reduces exactly to the plain imbalance
+  over the same levels and a large decay reduces to the top of book, which is
+  why the decay is a recorded parameter of the measurement rather than a
+  constant chosen somewhere.
+- **Book slope** the through-the-origin least-squares slope of cumulative depth
+  against *relative* distance from the mid, in quantity per unit relative
+  distance. Through the origin because a book holds no depth at zero distance
+  from the mid by construction, and an intercept would absorb exactly the
+  quantity being measured. Reported with the **uncentred** R-squared, which is
+  the correct goodness-of-fit for a no-intercept model; the centred form can be
+  negative for a perfectly reasonable fit.
+- **Depth concentration** the Herfindahl index of the level sizes. Its
+  reciprocal is the effective number of levels the depth is spread across,
+  which is the form worth reading.
+- **Cost to trade** the average price of walking the displayed book for a given
+  size, against the mid, signed so a cost is positive whichever way the order
+  goes. It is a measurement of one instant, not a prediction and not an impact
+  model: it says what the resting size would have cost if it had all been taken
+  at once and nothing had moved. **A size larger than the displayed depth is
+  refused**, not extrapolated past the last level — the price beyond the book is
+  not in the book.
+
+Session summaries report percentiles rather than a standard deviation, because
+a session of books is not remotely normal and a handful of instants around an
+auction own the variance. Every measure carries its own observation count, and
+the snapshots that had no such measurement are counted by the reason they had
+none, so an average is never quietly an average over a subset nobody chose.
+
+### Arrival intensity, and the gate that decides which model is reported
+
+Two models are fitted to the same events. The baseline is a homogeneous Poisson
+process with rate `N / T`. The alternative is a univariate Hawkes process with
+an exponential kernel (Hawkes 1971):
+
+    lambda(t) = mu + sum_{t_i < t} alpha * exp(-beta * (t - t_i))
+
+whose branching ratio `n = alpha / beta` is the expected number of children per
+event and whose long-run rate is `mu / (1 - n)`.
+
+**Stationarity is structural.** The optimiser works in `(log mu, logit n, log
+beta)` and reconstructs `alpha = n * beta`, so `0 < n < 1` holds at every point
+it can evaluate — the same rule as the Phase 2 SVI calibration, where a
+constraint that matters belongs in the feasible set rather than in a rejection
+afterwards, because a rejected optimum leaves nothing to report. The likelihood
+is evaluated with Ogata's recursion, vectorised by blocking so the exponent
+stays finite over a window far longer than the decay; the fast path is checked
+against the plain recursion in the test suite.
+
+**A self-exciting model always fits better in sample.** It has two more
+parameters and order flow does cluster, so reporting the in-sample improvement
+would be reporting the parameters. Both models are therefore fitted on a
+training window and scored on a held-out one, split **by time** rather than by
+event count — splitting by count would put the busiest period on whichever side
+had more events and make the comparison a statement about that. The training
+events are carried into the held-out window as history, so the Hawkes excitation
+is not reset at the split and the comparison is not rigged against it.
+
+**And "wins" is not "scores one nat more".** On genuinely Poisson arrivals the
+raw held-out total favours the richer model about as often as not, by hundredths
+of a nat — noise with a sign. So the held-out likelihood is decomposed into one
+predictive contribution per event, `log lambda(t_k) - Lambda(t_{k-1}, t_k)`, and
+the *mean* contribution is tested against zero with a one-sided
+Diebold-Mariano statistic using a Newey-West variance (Diebold & Mariano 1995;
+Newey & West 1987). The HAC correction is not decoration: consecutive
+contributions from a clustered point process are serially correlated, and an
+i.i.d. standard error would understate their spread and adopt the richer model
+on noise. The Hawkes fit is reported only when that statistic clears its stated
+critical value; otherwise the constant rate is what is reported, together with
+by how much the alternative failed to earn its parameters. Both models are
+stored either way, because "it was tried and did not win here" is the evidence
+that the gate ran. A database CHECK makes a row claiming the self-exciting model
+without the statistic to back it unstorable.
+
+The fitted model's time-rescaled inter-event times are reported as a
+Kolmogorov-Smirnov statistic against `Exp(1)`. That is a diagnostic, reported
+rather than acted on: it says how far the model is from describing its own
+training data, which the likelihood alone does not.
+
+### Queue outlook
+
+The most gated calculation in the platform, and worth being precise about why.
+An exchange knows the order of the queue at a price level. An observer of a
+public feed does not: they see the level's total size and the messages that
+change it. They cannot see priority, cannot see which specific orders
+cancelled, and on most feeds cannot see hidden size at all.
+
+So the output is a **bracket**, in the same spirit as the Phase 6 margin
+shortfall region. A cancellation at the level either removes size ahead of the
+order or behind it, and the feed does not say which:
+
+- `CANCELS_AHEAD` — every cancellation removes size in front. The queue drains
+  fastest; the optimistic end.
+- `CANCELS_BEHIND` — only trades move the order forward. The pessimistic end.
+
+Departures are modelled as a Poisson counting process consuming the queue in
+units of the mean size of an observed departure. **That size unit is shared by
+both ends**, and sharing it is what makes the pair a bracket: the optimistic
+departure stream contains the pessimistic one, so its volume rate is larger by
+construction, and with a common unit the wait can only be shorter and the fill
+probability only higher. Giving each end its own mean size breaks that, and did
+— a level where five small cancellations accompanied one large trade produced an
+"optimistic" end *less* likely to fill, which is not a bracket but two unrelated
+numbers. The invariant is asserted on the object and again by a database CHECK.
+
+Every assumption travels with the estimate: FIFO priority, displayed size only,
+Poisson departures at the observed rate, rates measured over the past rather
+than forecast, and an order that joins at the back and is never modified. The
+response says in its own `interpretation` field that it is not a claim about
+where any exchange has actually placed an order. There is no single
+`fill_probability` field anywhere in the payload or the stored row — a
+probability exists only inside a labelled end of the bracket.
+
+A level at which nothing was observed to leave is **refused**, not scored zero.
+A probability of zero reads as "this will not fill" when the truth is "this feed
+did not show us anything happening here", and those are different statements.
+
+### Storage
+
+Depth snapshots and event tapes are the two datasets that grow with market
+activity rather than user activity, so they live in the object store as parquet
+rather than in PostgreSQL — one session of depth for one liquid contract is
+millions of rows, and the access pattern is analytical. Prices and quantities
+are stored as `decimal128(38, 12)`: a stored observation is a fact, and the
+platform does not quietly re-round the ticks a venue published. Levels are list
+columns rather than a fixed `bid_px_1 ... bid_px_20` width, because depth varies
+snapshot to snapshot and a padded level is indistinguishable from a level quoted
+at zero, which is a real thing on some venues.
+
+### Import
+
+Wide CSV — one row per instant with the levels spread across it — is what a
+capture tool writes, and the indexed-column layout defeats the platform's
+ordinary one-column-per-field mapping, so the level columns are detected. As
+everywhere else, detection is a *suggestion* shown in a mandatory preview and
+confirmed on commit: a book whose price and size columns were read the wrong way
+round parses cleanly and produces analytics that are wrong in every number and
+look entirely ordinary. Canonical parquet is accepted directly.
+
+Nothing is repaired. A book whose levels are not ordered best-first is refused
+with a reason rather than sorted, because sorting would rescue exactly the
+transposed file above and turn a detectable mistake into a plausible book. The
+counts conserve, and every rejected row carries its 1-based source row number
+and a closed-vocabulary reason — the complete list, in the object store, because
+it is unbounded and a column would have to truncate it.
+
 ## 18. Known limitations
 
 1. European exercise only; American options on dividend-paying underlyings are
@@ -1128,3 +1322,20 @@ to make a model runnable.
    term structure is deliberately flat and `dw/dT` is therefore zero. The PDE
    substitutes the surface's implied volatility there and counts the
    substitutions rather than extrapolating a term structure nobody quoted.
+10. Microstructure analytics describe *displayed* liquidity. Hidden and iceberg
+    quantity is invisible to a public feed, so a depth, a cost to trade and a
+    queue position are all lower bounds on what is really resting there, and no
+    feed says by how much.
+11. The book is never reconstructed from an event tape. A dataset with events
+    and no snapshots gets arrival intensities and nothing that needs a book at
+    an instant, because a reconstruction would depend on a starting book, a
+    complete tape and a venue-specific set of message semantics — three
+    assumptions that would be invisible in the output.
+12. The queue model has no adverse-selection term and no model of the order's
+    own effect on the level it joins. Both ends of its bracket describe a level
+    behaving as it did over the observation window.
+13. The intensity models are univariate. Trades exciting cancellations, and
+    either exciting the other side, are a multivariate Hawkes process that is
+    not implemented; a scope covering several event types is fitted as one
+    superposed process and labelled as such rather than being called "order
+    flow".

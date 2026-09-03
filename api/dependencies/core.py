@@ -16,6 +16,7 @@ from domains.execution.application import ExecutionApplicationService
 from domains.instruments.service import InstrumentService
 from domains.jobs.service import JobService
 from domains.market_data.service import MarketDataService
+from domains.microstructure.application import MicrostructureApplicationService
 from domains.portfolio.application import PortfolioApplicationService
 from domains.portfolio.service import PortfolioService
 from domains.reports.composition import (
@@ -118,6 +119,13 @@ def market_data_service(
     return MarketDataService(session, settings, store)
 
 
+def microstructure_service(
+    session: SessionDep, settings: SettingsDep, store: ObjectStoreDep
+) -> MicrostructureApplicationService:
+    """L2 datasets. Takes the object store because the bulk data lives there."""
+    return MicrostructureApplicationService(session, settings, store)
+
+
 def derivatives_service(session: SessionDep, settings: SettingsDep) -> DerivativesService:
     return DerivativesService(session, settings)
 
@@ -183,6 +191,9 @@ AdvancedDerivativesDep = Annotated[
 InstrumentServiceDep = Annotated[InstrumentService, Depends(instrument_service)]
 JobServiceDep = Annotated[JobService, Depends(job_service)]
 MarketDataServiceDep = Annotated[MarketDataService, Depends(market_data_service)]
+MicrostructureServiceDep = Annotated[
+    MicrostructureApplicationService, Depends(microstructure_service)
+]
 PortfolioServiceDep = Annotated[PortfolioService, Depends(portfolio_service)]
 PortfolioApplicationDep = Annotated[PortfolioApplicationService, Depends(portfolio_application)]
 ValuationComposerDep = Annotated[ValuationContextComposer, Depends(valuation_composer)]

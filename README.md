@@ -167,14 +167,42 @@ with **no `best_model` field and no field that could hold one**, because
 choosing between sets of wrong assumptions is a judgement the platform is not in
 a position to make.
 
+**Phase 10 — microstructure.**
+Order-book analytics, arrival intensity and a queue outlook, every one of them
+behind a **data-availability gate**. A dataset is assessed once at import and
+gets six capability verdicts, each granted or refused with a closed-vocabulary
+reason and the evidence it was decided on; a refused capability has no endpoint
+that will answer anyway and no parameter that overrides it. That is not caution
+for its own sake — a volatility surface fitted to thin data is visibly
+uncertain, but an order-book imbalance computed from a one-level feed is a
+number between -1 and 1 that looks exactly like a real one.
+
+The Hawkes arrival model ships only when it earns its parameters. Both it and a
+constant-rate baseline are fitted on a training window and scored on a held-out
+one, and the self-exciting fit is reported only when the *mean* per-event
+predictive gain clears its own Newey-West standard error. The first version
+compared held-out totals and adopted the richer model on seven of ten tapes with
+no clustering whatsoever, by hundredths of a nat; the threshold now sits on the
+difference standardised by the noise in it, and the same ten are all refused. A
+database CHECK makes a row claiming the model without the statistic unstorable.
+
+Queue position is a **bracket**, not a number — its two ends are the two
+cancellation-priority assumptions a public feed cannot distinguish — and the
+response says in its own words that it is not a claim about where any exchange
+has placed an order. Depth snapshots and event tapes are parquet in the object
+store with prices as decimals, because a stored observation is a fact and the
+platform does not re-round a venue's ticks on the way to disk.
+
 **Not shipped, on purpose:** American exercise, jump-diffusion and rough
 volatility, PCA on surface changes (gated on real history), Almgren-Chriss, and
-any calibrated impact coefficient. Also not shipped: any margin model claiming
+any calibrated impact coefficient. Also not shipped in microstructure: book
+reconstruction from an event tape, a multivariate Hawkes process, and an
+adverse-selection term in the queue model. Also not shipped: any margin model claiming
 to be a broker's or an exchange's, any short-option or concentration rate —
 those are venue rules, and the platform does not have them — and any reading of
 the implied density as a forecast of where the underlying will go.
 
-2,392 tests: unit, integration, quantitative validation, golden-file regression,
+2,533 tests: unit, integration, quantitative validation, golden-file regression,
 plus opt-in benchmarks.
 
 ---

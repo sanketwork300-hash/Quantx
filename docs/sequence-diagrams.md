@@ -219,7 +219,69 @@ the width of the interval containing them; picking one would be a judgement
 about which set of wrong assumptions is least wrong today, and the platform does
 not make it.
 
-## 6. Unified order analysis (Phase 11)
+## 6. Microstructure (Phase 10)
+
+The shape of this flow is different from every other one in this document, and
+deliberately so: the judgement about what the data can support is made **once,
+at import**, and every later call reads it rather than re-deriving it.
+
+```
+Client   API   MicroSvc  Importer  Gate  ObjectStore  DB   quant/microstructure
+  |       |        |         |       |        |        |            |
+  |-POST /uploads (kind=BOOK_SNAPSHOTS) ---------------->|           |
+  |-POST /uploads (kind=BOOK_EVENTS) ------------------->|           |
+  |
+  |-POST /microstructure/datasets/preview -->|
+  |       |        |--parse both halves----->|            |          |
+  |       |        |   wide-CSV level detection, or canonical parquet|
+  |       |        |   every bad row kept with its row number + reason
+  |       |        |--profile + assess------------->|     |          |
+  |<--detected columns, counts, and what this WOULD support (writes nothing)
+  |
+  |-POST /microstructure/datasets (confirmed mapping) --->|
+  |       |--create job, 202--------------------------------------->|
+  |       |        |--parse, then write parquet--------->|           |
+  |       |        |   snapshots.parquet, events.parquet, rejections.json
+  |       |        |--assess ONCE------------------>|     |          |
+  |       |        |--store dataset row + the full availability report->|
+  |
+  |-POST /microstructure/datasets/{id}/analyze ---------->|
+  |       |        |--require(TOP_OF_BOOK) from the STORED report--->|
+  |       |        |   refused -> 422 with reason + evidence, and stop
+  |       |        |--read snapshots parquet----------->|            |
+  |       |        |--measure every snapshot------------------------>|
+  |       |        |   each measure carries its observation count and
+  |       |        |   the reasons the rest had no such measurement
+  |
+  |-POST /microstructure/datasets/{id}/intensity -------->|
+  |       |        |--require(EVENT_INTENSITY [, CANCELLATION_INTENSITY])
+  |       |        |--fit Poisson AND Hawkes on the training window->|
+  |       |        |--score both on the held-out window------------->|
+  |       |        |--Diebold-Mariano on the per-event gain--------->|
+  |       |        |--store BOTH, with the verdict between them----->|
+  |
+  |-POST /microstructure/datasets/{id}/queue  (inline, not a job)
+  |       |        |--require(QUEUE_POSITION)
+  |       |        |--read the level, count departures at that price->|
+  |<--a bracket: two ends, two assumptions, and no single number
+```
+
+Three things this diagram is drawing attention to.
+
+**The gate is consulted, not recomputed.** `require_capability` reads the report
+stored at import. Deciding at call time would let four endpoints drift into four
+different opinions about what the data supports.
+
+**Both intensity models are stored whatever the verdict.** "It was tried and did
+not earn its parameters here" is the evidence that the comparison ran, and a
+database CHECK stops a row claiming the self-exciting model without the held-out
+statistic that earned it.
+
+**The queue answer is inline and is a range.** Inline because a user moving a
+price around should not poll for each answer; a range because its two ends are
+the two cancellation-priority assumptions a public feed cannot distinguish.
+
+## 7. Unified order analysis (Phase 11)
 
 ```
 Client  API   OrderAnalysisSvc  MarketStateBuilder  ValuationSvc  SurfaceSvc  ExecSvc  RiskSvc  MarginSvc

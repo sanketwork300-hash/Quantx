@@ -105,3 +105,6 @@ is unset or still the example value.
       surface calibration failure rate, quote staleness** — the quantitative
       metrics are the ones that catch wrong numbers while everything technical
       is green
+- [ ] Object-store lifecycle policy for `microstructure/`: L2 parquet grows with
+      market activity rather than user activity, so it is the one prefix that
+      will outgrow its bucket without one

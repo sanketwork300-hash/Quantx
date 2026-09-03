@@ -315,7 +315,7 @@ production code path.
 | --- | --- | --- |
 | users, portfolios, positions, instruments, jobs, model registry | PostgreSQL | transactional, relational, small |
 | quotes, bars, risk snapshots, surface parameters | PostgreSQL + TimescaleDB hypertables | time-ordered, queried by range, moderate volume |
-| raw uploads, L2 history, tick trades, historical option chains, MC paths, simulation output | object store, Parquet | unbounded volume; column-pruned analytical access |
+| raw uploads, L2 depth and event history **(P10)**, tick trades, historical option chains, MC paths, simulation output | object store, Parquet | unbounded volume; column-pruned analytical access |
 | latest quote, latest surface, expensive results | Redis | read-through cache, versioned keys |
 
 Partitioning for object-store datasets:
@@ -842,3 +842,115 @@ surface is what the price depends on.
 directly instead, with QuantLib as the test oracle, following the standing rule
 for core numerics in `docs/references.md`. The deviation is recorded in both
 documents rather than left as a discrepancy between the plan and the code.
+
+## 24. What Phase 10 adds
+
+```
+quant/microstructure/
+  book.py            snapshot measures, each returning a value or a reason
+  intensity.py       Poisson and Hawkes, and the held-out test between them
+  queue.py           the bracketed queue outlook
+
+domains/microstructure/
+  models.py          dataset profile, rejection vocabularies, sequencing report
+  availability.py    THE GATE — six capabilities, granted or refused with evidence
+  importer.py        wide-CSV level detection and the canonical parquet path
+  storage.py         parquet in the object store, decimals not floats
+  analytics.py       measure every snapshot, summarise what was measurable
+  intensity.py       select a scope, run the comparison, carry the verdict out
+  queue.py           assemble the level and its departures, hand them to quant/
+  orm.py             four tables, three of which encode the gate as CHECKs
+  application.py     require the capability, then compute. Never the reverse
+  jobs.py            IMPORT_BOOK_DATA, ANALYZE_MICROSTRUCTURE, FIT_INTENSITY
+
+api/routes/microstructure.py, api/schemas/microstructure.py
+web/app/microstructure/
+```
+
+### The gate is a stored judgement, not a runtime check
+
+Every other engine in the platform computes what it can and degrades with a
+warning. This one refuses, and the refusal is decided **once, at import**, and
+stored on the dataset row.
+
+That ordering is the design. Deciding at call time would mean each endpoint
+re-derived what the data supports, and the four endpoints would drift; deciding
+at import means there is one judgement, recorded with its evidence and the
+thresholds it was taken against, that every endpoint consults and none can
+recompute more leniently. `MicrostructureApplicationService.require_capability`
+is the only way through, and it reads the stored report rather than the data.
+
+The reason microstructure gets this and the other phases do not is that its
+failure mode is different. A surface fitted to thin data is *visibly* uncertain.
+An order-book imbalance from a one-level feed is a number between -1 and 1 that
+looks exactly like a real one.
+
+### `BookEvent` went into market data, not into this domain
+
+An order-book message is a canonical market observation, so it lives beside
+`Quote`, `Bar`, `Trade` and `OrderBookSnapshot` in `domains/market_data/models.py`
+rather than in the domain that happens to consume it first. Two things follow:
+a provider can publish events without Phase 10 existing, and
+`ProviderCapability.BOOK_EVENTS` is declarable separately from `ORDER_BOOK` —
+which matters, because a feed that publishes periodic depth supports the book
+analytics and cannot support a queue or an intensity model, and the difference
+has to be visible before a caller plans around it.
+
+### The storage rule finally bites
+
+`docs/architecture.md` §10 has said since Phase 0 that anything growing with
+market activity belongs in the object store. Phase 10 is the first dataset where
+that is not a rounding error — one session of depth for one liquid contract is
+millions of rows — and it is followed exactly: parquet under a server-generated
+key, a metadata row in Postgres, and the complete rejection list in the object
+store too, because it is unbounded and a column would have to truncate the very
+thing that makes "nothing is dropped without a reason" checkable.
+
+Two decisions inside the file are worth recording. Prices and quantities are
+`decimal128(38, 12)` rather than floats, because a stored observation is a fact
+and the platform does not re-round a venue's ticks on the way to disk. And
+levels are list columns rather than a fixed `bid_px_1 ... bid_px_20` width,
+because depth genuinely varies and a padded level is indistinguishable from a
+level quoted at zero — which is a real thing on some venues.
+
+### A held-out win had to become a held-out *test*
+
+The first version of the intensity gate compared held-out log-likelihood totals
+and adopted the self-exciting model when the difference was positive. On ten
+tapes of genuinely Poisson arrivals it adopted the richer model seven times, by
+margins around 0.05 nats over nine hundred events — noise with a sign.
+
+The fix was to stop comparing totals. The held-out likelihood decomposes
+sequentially into one predictive contribution per event, and the mean of those
+is testable against zero with a one-sided Diebold-Mariano statistic and a
+Newey-West variance. With the HAC correction — which is not optional, because
+consecutive contributions from a clustered process are serially correlated — the
+same ten Poisson tapes are all refused and five self-exciting tapes are all
+adopted with statistics around 9.
+
+The general lesson is one this codebase keeps relearning, first in Phase 3's
+anomaly threshold: **the threshold does not belong on the raw difference.** It
+belongs on the difference standardised by the size of the thing that could
+account for it.
+
+### A constraint found a bug the tests did not
+
+`ck_queue_estimate_is_a_bracket` requires the optimistic end of a queue outlook
+to be at least as likely to fill as the pessimistic one. It failed on the first
+integration run.
+
+The cause was real. Each end had been given its own mean departure size —
+trades only for the pessimistic end, trades and cancellations for the optimistic
+one — and on a level where five small cancellations accompanied one large trade,
+the optimistic end had a *smaller* mean size, therefore needed *more* departure
+events, and came out less likely to fill. The two ends were not a bracket at
+all; they were two unrelated numbers.
+
+Both ends now consume the queue in one shared size unit, so the optimistic
+departure stream containing the pessimistic one is enough to make the ordering
+hold by construction. The invariant is asserted on the object as well, in
+`QueueOutlook.__post_init__`, following `Schedule.__post_init__` from Phase 8.
+
+This is the third time a database CHECK written to express a documented rule has
+caught a live defect rather than merely documenting one, and it is the argument
+for writing them.

@@ -12,6 +12,9 @@ byte-identical files and the golden-file regression suite can pin exact outputs.
 | `options_chain_clean.csv` | 60 quotes, 2 expiries, 15 strikes. Generated from an admissible raw-SVI slice with total variance increasing in maturity, so the chain is internally arbitrage-free (put-call parity, static bounds, vertical monotonicity, butterfly convexity and calendar consistency, up to tick rounding). Headers are deliberately messy (`STRIKE_PRICE`, `CE_PE`, `EXPIRY_DT`, `LTP`, `OI`) so mapping inference is exercised rather than a schema we would never meet. |
 | `options_chain_bad_quotes.csv` | The same chain with one instance of each failure the pipeline must catch, so "every excluded quote has a reason" is verified against data that actually triggers every reason. |
 | `trades.csv` | Twelve fill rows against the contracts in `options_chain_clean.csv`: two explicitly-parented orders (one buy, one sell) with submit timestamps, three unparented fills that must group by time into two inferred parents, and one instance each of the four rejections a trade log must catch. Fill prices sit on the chain's own mids and the averages are exact — 442/445/448 averages to 445.00, 76/78 to 77.00 — so a shortfall against any benchmark can be checked by hand. Headers are messy again (`TRADE_TIME`, `ACTION`, `FILL_PRICE`, `PARENTORDER`, `COMMISSION`). |
+| `orderbook_snapshots.csv` | 361 depth snapshots at 5-second intervals over 30 minutes, five levels a side, generated around the at-the-money call of the near expiry in `options_chain_clean.csv` — so the L2 fixture and the chain fixture describe one contract rather than two unrelated synthetic markets. Depth thickens away from the touch, so the book slope is a positive number rather than noise. The headers are deliberately in the two orderings a capture tool actually writes: `BID_PX_1` on one side and `ASK1PRICE` on the other, so the level-column detection is exercised rather than one tidy convention. Eight further rows, timestamped past the end of the series, seed one instance of every snapshot rejection. |
+| `orderbook_events.csv` | 2,724 order-book messages over the same 30 minutes, from a **seeded Hawkes process** (`mu = 0.5, alpha = 1.0, beta = 1.5`, branching ratio 0.667), split roughly 50/35/15 between adds, cancels and trades, priced at the touch or one level behind it, with contiguous sequence numbers. Self-exciting on purpose: the held-out comparison has to have something real to adopt, so the branch that *reports* a Hawkes fit is exercised. The branch that must **refuse** one is generated inside the tests from Poisson arrivals, because what it proves is a property of the gate rather than of any file. Seven further rows seed one instance of every event rejection. |
+| `orderbook.parquet` | The same 361 snapshots in the platform's canonical parquet schema, so the parquet upload path is exercised alongside the wide-CSV one. Prices and quantities are `decimal128(38, 12)`; levels are list columns. The generator passes a fixed `written_at`, because a wall-clock stamp in the footer would make every regeneration a diff; the file is byte-identical for a given `pyarrow` version, which also writes its own version into the footer. |
 | `portfolio_options.csv` | Ten position rows against the contracts in `options_chain_clean.csv`: six option legs across both expiries, one index leg, and one instance each of the three rejections a position file must catch. Headers are again messy (`NETQTY`, `AVGPRICE`, `CE_PE`, `TYPE`, `TAG`) so mapping inference is exercised. |
 
 ### What `options_chain_bad_quotes.csv` seeds
@@ -74,13 +77,24 @@ checked against the Black-Scholes closed form on a grid of contracts, and Heston
 against QuantLib on another — both generated in the test, because a committed
 fixture would only record what our own code produced.
 
-## Planned
+### What the order-book fixtures seed
 
-Added with the phase that consumes them (see `docs/backlog.md`):
+Snapshot rejections, one row each: `MISSING_TIMESTAMP`, `NEGATIVE_PRICE`,
+`NEGATIVE_QUANTITY`, `LEVELS_OUT_OF_ORDER` (bid level 2 priced above level 1 —
+exactly what a file with its price and size columns transposed looks like, and
+the reason the importer refuses rather than sorting), `PRICE_WITHOUT_QUANTITY`,
+`NO_LEVELS`, `UNPARSEABLE_ROW` and `DUPLICATE_OBSERVATION`.
 
-| File | Phase |
-| --- | --- |
-| `orderbook.parquet` | 10 |
+Event rejections, one row each: `MISSING_TIMESTAMP`, `MISSING_EVENT_TYPE`,
+`UNRECOGNISED_EVENT_TYPE`, `UNRECOGNISED_SIDE`, `NEGATIVE_PRICE`,
+`NEGATIVE_QUANTITY` and `UNPARSEABLE_ROW`.
+
+The corruptions are *appended* after the clean series and timestamped past its
+end, rather than replacing rows in it. That makes `input == kept + rejected`
+checkable by hand against the two counts, and keeps the kept snapshots exactly
+the clean ones. The tests compare the set of reasons triggered against
+`set(SnapshotRejection)` and `set(EventRejection)` by equality, so a new
+rejection reason cannot be added without a fixture row that produces it.
 
 ## A warning about synthetic data
 

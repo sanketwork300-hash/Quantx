@@ -36,6 +36,7 @@ export default function RootLayout({
                 <div className="group">Execution</div>
                 <Link href="/execution">Trade analysis</Link>
                 <Link href="/execution/simulate">Simulation</Link>
+                <Link href="/microstructure">Order book</Link>
                 <div className="group">Data</div>
                 <Link href="/data">Imports</Link>
                 <div className="group">Account</div>

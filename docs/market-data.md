@@ -47,6 +47,13 @@ class MarketDataProvider(ABC):
     async def get_bars(self, instrument_id, interval, start, end) -> Sequence[Bar]: ...
 ```
 
+`ProviderCapability.BOOK_EVENTS` is declared separately from `ORDER_BOOK`, and
+the distinction matters more than it looks: a feed that publishes periodic depth
+supports the Phase 10 book analytics and cannot support a queue or an arrival-
+intensity model, because the changes between two snapshots are not the messages
+that caused them. Collapsing the two into one "L2" capability would let a caller
+plan for an analytic the feed can never provide.
+
 Providers declare `capabilities` rather than raising `NotImplementedError` at
 call time, so a caller can plan (e.g. "this provider has no L2, skip
 microstructure analytics") instead of failing mid-pipeline. Unsupported calls
@@ -99,7 +106,7 @@ Derived (computed properties, never stored as truth):
 | `mid_price` | `(bid + ask) / 2` when both sides are present and positive, else `None` |
 | `spread` | `ask - bid` |
 | `relative_spread` | `spread / mid` |
-| `microprice` | `(bid*ask_size + ask*bid_size) / (bid_size + ask_size)` |
+| `microprice` | `(bid*ask_size + ask*bid_size) / (bid_size + ask_size)` — weighted by the *opposite* side's size, so a large resting bid pulls it toward the ask |
 | `quote_age(now)` | `now - exchange_timestamp` |
 
 `mid_price` returns `None` rather than falling back to `last_price`. A silent
@@ -126,11 +133,36 @@ it; we do not silently reconstruct a VWAP and call it observed), `trade_count`.
 `sequence_number`, `source`; each level is `(price, quantity, order_count?)`.
 Levels are ordered best-first and validated for monotonicity on ingest.
 
-Storage: Parquet in the object store, partitioned
-`orderbook/exchange=.../instrument=.../date=.../hour=...`. One PostgreSQL row per
-book update is explicitly rejected as a design.
+Storage **(implemented in Phase 10)**: parquet in the object store, one row per
+snapshot with the levels as list columns rather than a fixed
+`bid_px_1 ... bid_px_20` width — depth genuinely varies snapshot to snapshot,
+and a padded level is indistinguishable from a level quoted at zero. Prices and
+quantities are `decimal128(38, 12)`, so a venue's ticks are not re-rounded on
+the way to disk. One PostgreSQL row per book update is explicitly rejected as a
+design.
 
-### 3.6 `Trade`
+### 3.6 `BookEvent`
+
+`instrument_id`, `exchange_timestamp`, `event_type` (ADD / CANCEL / MODIFY /
+TRADE), `side`, `price`, `quantity`, `sequence_number`, `order_id`, `source`.
+
+Note what is *not* on it: no queue position, no inferred aggressor, no
+reconstructed book state. Each of those is a derivation, and derivations live
+beside the observation rather than inside it.
+
+`event_type` is never inferred. A feed that does not label its messages is
+reported as unlabelled rather than classified by a heuristic on price and size —
+a cancellation counted as a trade drains a queue that never drained.
+`MODIFY` is kept distinct from an ADD/CANCEL pair because a venue that publishes
+it usually preserves queue priority for a size reduction and loses it for an
+increase, and collapsing the two would silently assert one of those.
+
+`sequence_number` is nullable because plenty of exported tapes drop it, and its
+absence is a fact the Phase 10 availability gate reads: without sequencing there
+is no way to know whether the tape is complete, and a queue model computed on a
+tape with a hole in it is a queue model of a different book.
+
+### 3.7 `Trade`
 
 `instrument_id`, `exchange_timestamp`, `price`, `quantity`, `aggressor_side`
 (nullable — many feeds do not publish it and inferring it is a model, not an

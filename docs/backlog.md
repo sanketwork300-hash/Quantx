@@ -373,12 +373,76 @@ volatility model, and any use of the implied density as a forecast. The first
 two are named as later work in `docs/pricing.md`; the third is a category error
 the density payload states in its own `interpretation` field.
 
-## Phase 10 — Microstructure  `[ ]`
+## Phase 10 — Microstructure  `[x]`
 
-Only with adequate event data: L2 Parquet storage, imbalance, microprice, depth,
-book slope, trade/cancel intensity, queue model, Hawkes. Each gated on a data
-availability check, and Hawkes must beat a Poisson baseline on held-out data
-before it ships.
+- [x] L2 parquet storage in the object store: depth snapshots as list columns,
+      event tapes as a message table, prices and quantities as decimals
+- [x] Wide-CSV and canonical-parquet import, with level-column detection shown
+      in a mandatory preview and confirmed on commit
+- [x] The **data-availability gate**: six capabilities, each granted or refused
+      with a closed-vocabulary reason and the evidence it was decided on
+- [x] Book analytics: spread, microprice and its tilt, single- and multi-level
+      imbalance, weighted imbalance, book slope with an uncentred R-squared,
+      depth concentration, cost to trade the displayed book
+- [x] Trade and cancellation intensity, by event type, side and price level
+- [x] Hawkes against a Poisson baseline, adopted only on a held-out
+      Diebold-Mariano test with a Newey-West variance
+- [x] Queue outlook as a bracket over the cancellation-priority assumption
+- [x] `IMPORT_BOOK_DATA`, `ANALYZE_MICROSTRUCTURE` and `FIT_INTENSITY` job
+      handlers; the queue estimate answers inline
+- [x] UI: dataset page with the capability verdicts, the session measures, the
+      two intensity models side by side and the queue bracket
+
+**Acceptance — verified**
+
+| Criterion | Where |
+| --- | --- |
+| Every capability is gated on a data-availability check, with a reason and its evidence | `tests/unit/test_microstructure.py::TestTheAvailabilityGate` — a snapshot-only feed, an event-only feed, a top-of-book feed, a tape with no cancellations, a coarse clock, an unsequenced tape and a tape with a hole each get the specific refusal they earn; `test_microstructure.py (integration)::TestTheGate` carries the same over the wire as a 422 with `reason`, `capability` and `evidence` |
+| There is no way past the gate from outside | `TestTheGate::test_there_is_no_parameter_that_overrides_a_refusal` — the published OpenAPI schema for every microstructure path is scanned for `force`, `override`, `skip_gate` and `ignore_availability` |
+| **Hawkes must beat a Poisson baseline on held-out data before it ships** | `tests/quant_validation/test_intensity.py::TestTheGate` — adopted on five self-exciting tapes, refused on ten Poisson tapes, and `test_a_raw_positive_total_is_not_enough_on_its_own` proves at least one Poisson tape with a *positive* raw held-out gain is still refused, so the gate is not reading the sign of a difference |
+| The stored row cannot claim a win it did not get | `ck_intensity_hawkes_needs_a_held_out_win` and `ck_intensity_adopted_model_matches_the_verdict`, exercised in `test_microstructure.py::test_the_stored_row_cannot_claim_a_win_it_did_not_get` against a below-threshold statistic, a non-converged fit and a drifted model name |
+| The estimator recovers a process whose parameters are known | `TestParameterRecovery` — three parameter sets recovered to 15% from 20,000 seconds of simulated arrivals, and the fit scores at least as well as the truth on its own sample |
+| The likelihood is the likelihood | `TestTheLikelihoodIsTheLikelihood` — the compensator against a quadrature of the intensity, the zero-jump case against the Poisson closed form, and `TestTheExcitationRecursion` checking the vectorised Ogata sum against the plain recursion at six decays including a window 10^4700 past overflow |
+| Stationarity is structural, not checked afterwards | `test_stationarity_is_structural` — fitted to arrivals with no clustering at all, the branching ratio is still inside `(0, 1)` |
+| Book measures are hand-checkable | `TestHandWorkedBookMeasures` — a microprice of 100.75 leaning away from the thick side, a slope of exactly 1400 with an R-squared of 0.98, an effective level count of 2, a walk of 15 across two levels |
+| A measurement the data cannot support is an absence with a reason | `TestWhatABookCannotSupport` — no mid on a one-sided book, no imbalance (not zero) with no resting size, no slope through one level, no cost to trade a size the book cannot absorb; `analyse_book` records every one on `unavailable` |
+| Every session measure reports what it was computed over | `TestSessionAnalytics::test_every_measure_reports_what_it_was_computed_over` — `observations + missing == snapshots_analysed` for all thirteen measures, and a measure that never existed carries the reason it did not |
+| The queue outlook is a bracket, never a number | `TestTheQueueBracket` — the two ends are the two cancellation assumptions, the optimistic end can only be faster, there is no field that could hold a single probability, and `ck_queue_estimate_is_a_bracket` makes an inverted pair unstorable |
+| A level nothing was seen to leave is refused, not scored zero | `test_a_level_nothing_ever_left_is_refused_not_scored_zero` |
+| Nothing is dropped without a reason | `TestSnapshotImport` / `TestEventImport` — `input == kept + rejected`, and the fixtures seed *every* member of both rejection enums, asserted by set equality so a new reason cannot be added without a row that triggers it |
+| Every rejected row names its source row number and reason | `test_every_rejected_row_names_its_row_number_and_reason`, over the complete list rather than a sample |
+| A transposed book is refused rather than sorted | `test_a_transposed_book_is_refused_rather_than_sorted` |
+| Stored observations are not re-rounded | `TestParquetRoundTrip::test_a_tick_price_is_not_re_rounded_by_the_store` — a 0.05 tick and an eight-decimal quantity survive exactly |
+| No microstructure response advises or promises | `TestLanguage` — asserted over the whole serialised response, plus `test_a_queue_position_never_claims_to_be_the_exchange_queue` |
+
+**Design notes**
+
+- **The gate is the phase.** Every other engine degrades with a warning; this
+  one refuses. An imbalance from a one-level feed and a queue position from a
+  tape with holes look exactly like the real thing, and there is nothing in the
+  number that says otherwise — so the judgement is made once, at import, stored
+  with the dataset, and consulted before anything runs.
+- **A raw held-out win is not evidence.** On genuinely Poisson arrivals the
+  self-exciting model wins the raw held-out total about as often as it loses it,
+  by hundredths of a nat. The first implementation adopted it seven times out of
+  eight on data with no clustering whatsoever. The fix was to decompose the
+  held-out likelihood into one predictive contribution per event and test the
+  *mean* against its own Newey-West standard error; with that, five out of five
+  self-exciting tapes are adopted and ten out of ten Poisson tapes are refused.
+- **A bracket has to be monotone by construction.** The queue model originally
+  gave each end its own mean departure size, and a level where five small
+  cancellations accompanied one large trade produced an "optimistic" end *less*
+  likely to fill than the pessimistic one. Found by the database CHECK, not by
+  the suite. Both ends now share one size unit, so the optimistic departure
+  stream containing the pessimistic one is enough to make the ordering hold.
+
+**What is deliberately not here**: book reconstruction from an event tape, a
+multivariate Hawkes process, and an adverse-selection term in the queue model.
+The first would need a starting book, a complete tape and venue-specific message
+semantics — three assumptions that would be invisible in the output. The second
+is the honest model of trades exciting cancellations and each side exciting the
+other, and it is named as later work rather than approximated by fitting one
+univariate process to a superposition and calling it order flow.
 
 ## Phase 11 — Unified order analysis  `[ ]`
 

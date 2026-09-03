@@ -1390,3 +1390,213 @@ export interface ModelConsensus {
   values: ModelValue[];
   created_at: string;
 }
+
+// --------------------------------------------------------- microstructure (P10)
+
+/** One capability verdict, with the evidence it was decided on.
+ *
+ *  `reason` is null exactly when `available` is true. Render the message; a
+ *  refusal that shows only the reason code tells the reader nothing about what
+ *  their feed was missing.
+ */
+export interface CapabilityVerdict {
+  capability: string;
+  available: boolean;
+  reason: string | null;
+  message: string;
+  evidence: Record<string, unknown>;
+}
+
+export interface MicrostructureDataset {
+  id: string;
+  instrument_id: string;
+  name: string;
+  kind: string;
+  source: string;
+  snapshot_rows_in: number;
+  snapshot_rows_kept: number;
+  snapshot_rows_rejected: number;
+  event_rows_in: number;
+  event_rows_kept: number;
+  event_rows_rejected: number;
+  rejection_counts: Record<string, number>;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  span_seconds: number;
+  max_depth_levels: number;
+  available_capabilities: string[];
+  created_at: string;
+}
+
+export interface DatasetDetail {
+  dataset_id: string;
+  instrument_id: string;
+  name: string;
+  kind: string;
+  source: string;
+  rows: {
+    snapshots: { input: number; kept: number; rejected: number };
+    events: { input: number; kept: number; rejected: number };
+    rejection_counts: Record<string, number>;
+  };
+  window: { start: string | null; end: string | null; span_seconds: number };
+  max_depth_levels: number;
+  availability: {
+    gate_version: string;
+    capabilities: CapabilityVerdict[];
+    available: string[];
+    refused: string[];
+    thresholds: Record<string, number>;
+    profile: Record<string, unknown>;
+  };
+}
+
+export interface DatasetPreview {
+  committable: boolean;
+  snapshots: {
+    input: number;
+    kept: number;
+    rejected: number;
+    detected_levels: number;
+    rejected_sample: { row_number: number; reason: string; message: string }[];
+  };
+  events: {
+    input: number;
+    kept: number;
+    rejected: number;
+    rejected_sample: { row_number: number; reason: string; message: string }[];
+  };
+  detected_snapshot_columns: {
+    timestamp: string | null;
+    receive_timestamp: string | null;
+    sequence: string | null;
+    depth: number;
+    levels: Record<string, Record<string, Record<string, string>>>;
+    unrecognised_columns: string[];
+  };
+  detected_event_mapping: Record<string, string>;
+  availability: DatasetDetail["availability"];
+}
+
+/** One measure over the session. `observations + missing` is always the number
+ *  of snapshots analysed, so an average is never quietly over a subset. */
+export interface MeasureSummary {
+  measure: string;
+  observations: number;
+  missing: number;
+  missing_reasons: Record<string, number>;
+  mean: number | null;
+  percentiles: Record<string, number>;
+  minimum: number | null;
+  maximum: number | null;
+}
+
+export interface TradeCostSummary {
+  quantity: number;
+  side: string;
+  snapshots_that_could_absorb_it: number;
+  snapshots_that_could_not: number;
+  median_slippage_bps: number | null;
+  p95_slippage_bps: number | null;
+  median_levels_consumed: number | null;
+  note: string;
+}
+
+export interface BookAnalyticsReport {
+  report_id: string;
+  dataset_id: string;
+  levels: number;
+  weighted_decay: number;
+  snapshots_analysed: number;
+  window: { start: string | null; end: string | null };
+  crossed_snapshots: number;
+  locked_snapshots: number;
+  measures: MeasureSummary[];
+  trade_costs: TradeCostSummary[];
+  series: Record<string, number | string | null>[];
+  series_note: string;
+}
+
+export interface IntensityFitOut {
+  parameters: Record<string, number | string | null>;
+  log_likelihood: number;
+  log_likelihood_per_event: number | null;
+  events: number;
+  window_seconds: number;
+  converged: boolean;
+  ks_statistic: number | null;
+}
+
+/** Both models, always. Read `hawkes_is_adopted` before rendering any Hawkes
+ *  parameter: when it is false those parameters describe a candidate the
+ *  held-out test rejected. */
+export interface IntensityComparison {
+  intensity_model_id?: string;
+  dataset_id: string;
+  scope?: string;
+  events_selected: number;
+  window: { start: string; end: string; split: string };
+  held_out_events: number;
+  poisson: { train: IntensityFitOut; held_out_log_likelihood: number };
+  hawkes: { train: IntensityFitOut; held_out_log_likelihood: number };
+  log_likelihood_gain: number;
+  log_likelihood_gain_per_event: number | null;
+  predictive_test: {
+    test: string;
+    variance_estimator: string;
+    mean_gain_per_event: number;
+    standard_error: number;
+    statistic: number;
+    critical_value: number;
+    significant: boolean;
+    events: number;
+    newey_west_lags: number;
+  };
+  hawkes_is_adopted: boolean;
+  adopted_model: string;
+  adopted_rate_per_second: number;
+  reason: string;
+  method: string;
+  interpretation: string;
+}
+
+/** A bracket. There is no single fill probability at the top level, and no
+ *  field that could hold one. */
+export interface QueueOutlookOut {
+  queue_estimate_id?: string;
+  dataset_id: string;
+  estimated_queue_position: number;
+  queue_position_fraction_of_displayed_size: number | null;
+  level_quantity: number;
+  price: string;
+  snapshot_timestamp: string;
+  horizon_seconds: number;
+  observation_window_seconds: number;
+  trades_observed: number;
+  cancels_observed: number;
+  estimated_fill_probability_range: [number, number];
+  estimated_wait_seconds_range: [number, number];
+  optimistic: QueueEnd;
+  pessimistic: QueueEnd;
+  assumptions: string[];
+  confidence: number;
+  interpretation: string;
+}
+
+export interface QueueEnd {
+  priority_assumption: string;
+  quantity_ahead: number;
+  departure_rate_per_second: number;
+  event_rate_per_second: number;
+  mean_event_size: number;
+  events_required: number;
+  estimated_wait_seconds: number;
+  estimated_fill_probability: number;
+  horizon_seconds: number;
+}
+
+export interface CapabilityReference {
+  capability: string;
+  measures: string[];
+  requires: string;
+}

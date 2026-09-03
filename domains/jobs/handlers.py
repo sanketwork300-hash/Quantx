@@ -44,6 +44,7 @@ def _load_builtin_handlers() -> None:
     from domains.derivatives.surface_jobs import register_handlers as register_surface
     from domains.execution.jobs import register_handlers as register_execution
     from domains.market_data.jobs import register_handlers as register_market_data
+    from domains.microstructure.jobs import register_handlers as register_microstructure
     from domains.portfolio.jobs import register_handlers as register_portfolio
     from domains.risk.jobs import register_handlers as register_risk
 
@@ -54,3 +55,4 @@ def _load_builtin_handlers() -> None:
     register_risk()
     register_execution()
     register_advanced()
+    register_microstructure()

@@ -81,9 +81,7 @@ class BookSide:
             raise ValueError("a negative resting size is not a book level")
         ordered = sorted(self.prices, reverse=self.is_bid)
         if list(self.prices) != ordered:
-            raise ValueError(
-                f"{'bids' if self.is_bid else 'asks'} are not ordered best-first"
-            )
+            raise ValueError(f"{'bids' if self.is_bid else 'asks'} are not ordered best-first")
 
     def __len__(self) -> int:
         return len(self.prices)
@@ -234,10 +232,7 @@ def weighted_imbalance(
 
     def weighted(side: BookSide) -> float:
         return float(
-            sum(
-                size * math.exp(-decay * index)
-                for index, size in enumerate(side.sizes[:levels])
-            )
+            sum(size * math.exp(-decay * index) for index, size in enumerate(side.sizes[:levels]))
         )
 
     bid_weight, ask_weight = weighted(book.bids), weighted(book.asks)
@@ -305,9 +300,7 @@ def book_slope(
         return None, Unavailable.DEGENERATE_PRICES
 
     slope = sum(d * c for d, c in zip(distances, cumulative, strict=True)) / denominator
-    residual = sum(
-        (c - slope * d) ** 2 for d, c in zip(distances, cumulative, strict=True)
-    )
+    residual = sum((c - slope * d) ** 2 for d, c in zip(distances, cumulative, strict=True))
     total = sum(c * c for c in cumulative)
     r_squared = 1.0 - residual / total if total > 0.0 else 0.0
     return SlopeEstimate(slope=slope, r_squared=r_squared, levels_used=len(prices))

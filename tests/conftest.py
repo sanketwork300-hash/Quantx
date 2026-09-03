@@ -64,6 +64,7 @@ async def app_environment(tmp_path, session_tmp_root) -> AsyncIterator[dict]:
     import domains.instruments.orm  # noqa: F401
     import domains.jobs.orm  # noqa: F401
     import domains.market_data.orm  # noqa: F401
+    import domains.microstructure.orm  # noqa: F401
     import domains.portfolio.orm  # noqa: F401
     import domains.reports.orm  # noqa: F401
     import domains.risk.orm  # noqa: F401

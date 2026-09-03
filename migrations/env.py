@@ -21,6 +21,7 @@ import domains.execution.orm  # noqa: F401, E402
 import domains.instruments.orm  # noqa: F401, E402
 import domains.jobs.orm  # noqa: F401, E402
 import domains.market_data.orm  # noqa: F401, E402
+import domains.microstructure.orm  # noqa: F401, E402
 import domains.portfolio.orm  # noqa: F401, E402
 import domains.reports.orm  # noqa: F401, E402
 import domains.risk.orm  # noqa: F401, E402

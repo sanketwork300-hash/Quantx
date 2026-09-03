@@ -658,7 +658,90 @@ descriptions of the same market fitted to the same quotes, and the point of the
 consensus is that they disagree — storing one inside the other's row would
 suggest a hierarchy the platform does not assert.
 
-### Planned tables (phases 10-11)
+### Phase 10 tables (implemented)
+
+The bulk data is deliberately absent from this list. Depth snapshots and event
+tapes are parquet in the object store; these tables hold identity, ownership,
+provenance and the small structured results the platform reasons about.
+
+```
+microstructure_datasets
+  id (PK), user_id (FK), instrument_id (FK), name, kind, source
+  snapshot_upload_id (FK), event_upload_id (FK)
+  snapshot_key, event_key   <- object-store parquet, not columns
+  rejection_key             <- the complete per-row rejection list, also in the
+                               object store: it is unbounded, and a column would
+                               have to truncate exactly the thing that makes
+                               "nothing is dropped without a reason" checkable
+  snapshot_rows_in / _kept / _rejected
+  event_rows_in / _kept / _rejected
+  rejection_counts          <- reason -> count, complete by construction
+  first_timestamp, last_timestamp, span_seconds, max_depth_levels
+  availability              <- the full gate report: profile, per-capability
+                               verdicts, evidence, and the thresholds they were
+                               taken against
+  available_capabilities    <- denormalised, so "which datasets support a queue
+                               model?" needs no JSON scan
+  provenance
+  CHECK(snapshot_rows_in = snapshot_rows_kept + snapshot_rows_rejected)
+  CHECK(event_rows_in = event_rows_kept + event_rows_rejected)
+  CHECK(snapshot_key IS NOT NULL OR event_key IS NOT NULL)
+
+book_analytics_reports
+  id (PK), user_id (FK), dataset_id (FK), instrument_id (FK)
+  levels, weighted_decay, snapshots_analysed
+  window_start, window_end, crossed_snapshots, locked_snapshots
+  median_spread, median_relative_spread, median_imbalance,
+  median_microprice_tilt   <- medians, not means: a session of books is not
+                              normal and the auction owns the mean
+  measures                 <- per measure: observations, missing, and the
+                              reasons the missing ones were missing
+  trade_costs, preview_series, series_key, warnings, provenance
+
+intensity_models
+  id (PK), user_id (FK), dataset_id (FK), instrument_id (FK)
+  scope, event_types, side, price, events_selected
+  window_start, window_end, split_timestamp, train_fraction
+  poisson_rate, poisson_train_log_likelihood,
+  poisson_held_out_log_likelihood
+  hawkes_mu, hawkes_alpha, hawkes_beta, hawkes_branching_ratio,
+  hawkes_train_log_likelihood, hawkes_held_out_log_likelihood,
+  hawkes_converged         <- stored whatever the verdict: "it was tried and did
+                              not win here" is the evidence the gate ran
+  held_out_events, mean_gain_per_event, test_statistic, critical_value
+  hawkes_is_adopted, adopted_model, adopted_rate, verdict_reason
+  comparison, warnings, provenance
+  CHECK(NOT hawkes_is_adopted OR (test_statistic > critical_value
+        AND hawkes_converged AND hawkes_branching_ratio < 1))
+  CHECK((adopted_model = 'HAWKES_EXPONENTIAL') = hawkes_is_adopted)
+
+queue_estimates
+  id (PK), user_id (FK), dataset_id (FK), instrument_id (FK)
+  side, price, snapshot_timestamp
+  quantity_ahead, level_quantity, horizon_seconds,
+  observation_window_seconds, trades_observed, cancels_observed
+  pessimistic_fill_probability, pessimistic_wait_seconds
+  optimistic_fill_probability, optimistic_wait_seconds
+                           <- two ends. There is no single-probability column,
+                              because one would be filled in eventually and read
+                              as a measurement
+  confidence, assumptions, detail, warnings, provenance
+  CHECK(optimistic_fill_probability >= pessimistic_fill_probability)
+  CHECK(trades_observed + cancels_observed > 0)
+```
+
+`ck_intensity_hawkes_needs_a_held_out_win` and
+`ck_intensity_adopted_model_matches_the_verdict` put the phase's central rule in
+the schema: a row cannot claim the self-exciting model without the held-out
+statistic that earned it, and the field a reader looks at cannot drift from the
+field the gate set.
+
+`ck_queue_estimate_is_a_bracket` earned its place immediately. The first queue
+model gave each end of the bracket its own mean departure size, and on a level
+where five small cancellations accompanied one large trade the "optimistic" end
+came out *less* likely to fill. The constraint caught it; the test suite had not.
+
+### Planned tables (phase 11)
 
 | Table | Phase | Notes |
 | --- | --- | --- |
@@ -694,3 +777,21 @@ metadata row in Postgres holding the key, schema version, row count and digest.
 
 The rule of thumb used here: if a dataset grows with market activity rather than
 with user activity, it belongs in the object store.
+
+Phase 10 is the first place this rule bites in earnest, and it is followed
+exactly. `microstructure_datasets` is the metadata row; the snapshots and the
+event tape are parquet under `microstructure/{user_id}/{dataset_id}/`, keyed by
+the dataset id so nothing a user supplies reaches a storage path. Two details
+worth recording:
+
+- Prices and quantities are `decimal128(38, 12)`, not floats. A stored
+  observation is a fact, and the platform does not re-round the ticks a venue
+  published on the way to disk.
+- Levels are list columns rather than a fixed `bid_px_1 ... bid_px_20` width.
+  Depth genuinely varies snapshot to snapshot, a fixed width would have to pad,
+  and a padded level is indistinguishable from a level quoted at zero — which is
+  a real thing on some venues.
+
+The complete per-row rejection list goes there too, for the same reason: it is
+unbounded, and truncating it into a column would truncate exactly the thing that
+makes "every rejected row names its source row number and reason" checkable.
