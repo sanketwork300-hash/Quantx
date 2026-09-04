@@ -64,7 +64,9 @@ checks and an audit log. Instruments with canonical keys, deterministic `uuid5`
 identity and a resolver where `AMBIGUOUS` is a first-class outcome. Market data:
 the provider interface, CSV and seeded-synthetic providers, canonical quote
 schemas, the **data-quality engine**, and the **option-chain ingestion
-pipeline**. Asynchronous jobs.
+pipeline** -- which reads both a long-form file and the **two-sided layout**
+every exchange chain export uses, where calls sit left of the strike and puts
+right of it under the same repeated header names. Asynchronous jobs.
 
 **Phase 1 — options MVP.**
 Day-count conventions and an explicit time-to-expiry policy. Content-addressed

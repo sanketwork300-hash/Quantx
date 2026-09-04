@@ -99,6 +99,42 @@ back out a factor, and the payload carries its own `units` block.
   way out.
 - Comparisons use declared tolerances (`tests/tolerances.py`), never `==`.
 
+## 2.5 File layout, and why it is resolved before column mapping
+
+An option-chain export from an exchange website is arranged one row per
+**strike**, not one row per quote: call fields to the left of `STRIKE`, put
+fields mirrored to the right, and no column naming the side at all.
+
+This cannot be described by a canonical-field-to-column-name mapping, and the
+failure is silent rather than loud. `BID`, `ASK`, `LTP`, `OI`, `VOLUME`,
+`BID QTY` and `ASK QTY` each occur once per side; a reader keyed by header name
+keeps one column per name and discards the other. The file then loads with no
+error and every call carries the put's bid, ask and last price. Every implied
+volatility, every surface point and every reference value computed from that
+chain is wrong, and nothing in the result says so.
+
+The layout is therefore resolved by **column index** first, and the name-based
+mapping runs afterwards on records that already know their side. Detection
+(`domains/market_data/ingestion/layout.py`) reads a file as two-sided only when
+a header row carries exactly one strike column, a block containing at least one
+price on each side of it, and no option-type column anywhere; the reading and
+the evidence for it are returned to the user in the preview, on the same
+footing as an inferred column mapping, and confirmed before any commit.
+
+Three conventions follow:
+
+* The expiry is supplied by the user, not read from the file. Chain exports
+  name one expiry in their filename and repeat it in no column. The filename's
+  date is offered as a suggestion tagged with its source; ingestion requires
+  the expiry explicitly, because a wrong expiry moves every contract along the
+  term structure without changing anything visible about the chain.
+* Every source row emits both sides. A side that was not quoted is judged by
+  the ordinary validator (`NO_PRICE_FIELDS`) rather than dropped by the
+  splitter, so there is one exclusion rule and `rows_input == kept + excluded +
+  rejected` continues to hold over quote rows.
+* Both quotes from a source line report that line's number, so a reported row
+  is one the user can open in their own spreadsheet.
+
 ## 3. Market data quality scoring — Phase 0 (implemented)
 
 Each sub-score maps a raw measurement to `[0, 1]` through a documented, bounded

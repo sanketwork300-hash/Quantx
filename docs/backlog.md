@@ -23,6 +23,9 @@ Legend: `[x]` shipped · `[ ]` planned
 - [x] Canonical `Quote` / `OptionQuote` / `Bar` / `OrderBookSnapshot` / `Trade`
 - [x] Data-quality engine (checks, five sub-scores, flags, exclusion policy)
 - [x] Option-chain ingestion pipeline: upload -> validate -> normalize -> quality -> persist -> retrieve
+- [x] Two-sided chain layout: detect an exchange export (calls left of the
+      strike, puts right of it, header names repeated per side), resolve it by
+      column index before any name-based mapping, and confirm it in the preview
 - [x] Jobs: model, service, task, status/progress/result API
 - [x] Test infrastructure: unit, integration, quant-validation, regression harness
 
@@ -35,6 +38,8 @@ Legend: `[x]` shipped · `[ ]` planned
 | The instrument master round-trips and is idempotent under re-import | `tests/unit/test_instrument_identity.py` |
 | The same contract yields the same UUID across processes | deterministic uuid5 test |
 | An option chain CSV can be uploaded, previewed, ingested and retrieved | `tests/integration/test_option_chain_ingestion.py` |
+| An exchange two-sided chain export ingests, and **calls keep the call prices** | `tests/integration/test_two_sided_chain.py`, `tests/unit/test_chain_layout.py` |
+| A long-form file is still read as long-form | `test_a_long_form_file_is_left_alone` |
 | **Every excluded quote has a non-null reason** | asserted over the bad-quote fixture |
 | A job runs asynchronously and reports terminal status | `tests/integration/test_jobs.py` |
 | Synthetic provider produces an arbitrage-clean chain | `tests/quant_validation/test_synthetic_provider.py` |

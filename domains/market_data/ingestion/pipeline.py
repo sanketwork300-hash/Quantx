@@ -32,6 +32,13 @@ from domains.market_data.ingestion.column_mapping import (
     OPTION_CHAIN_FIELDS,
     ColumnMapping,
 )
+from domains.market_data.ingestion.layout import (
+    ChainLayout,
+    TwoSidedLayout,
+)
+from domains.market_data.ingestion.layout import (
+    split as split_two_sided,
+)
 from domains.market_data.ingestion.parser import ParseResult, TabularParser
 from domains.market_data.ingestion.validator import (
     OptionChainRowValidator,
@@ -70,6 +77,7 @@ class IngestionWarningCode:
     CARRY_ASSUMPTION_UNAVAILABLE = "INGESTION_CARRY_ASSUMPTION_UNAVAILABLE"
     MULTIPLIER_ASSUMED = "INGESTION_MULTIPLIER_ASSUMED"
     UNMAPPED_COLUMNS = "INGESTION_UNMAPPED_COLUMNS"
+    TWO_SIDED_LAYOUT = "INGESTION_TWO_SIDED_LAYOUT"
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +128,11 @@ class OptionChainIngestionRequest:
     #: sub-intrinsic check; omitting them keeps the checks assumption-free.
     risk_free_rate: float | None = None
     dividend_yield: float | None = None
+    #: Set when the file is a two-sided chain export (calls left of the strike,
+    #: puts right of it). The side is implied by column position, so the layout
+    #: must be resolved before the name-based ``column_mapping`` can apply. The
+    #: layout also carries the expiry, which such a file names in no column.
+    layout: TwoSidedLayout | None = None
     upload_id: uuid.UUID | None = None
     dataset_digest: str | None = None
     provider: str = "csv"
@@ -177,9 +190,56 @@ class OptionChainIngestionPipeline:
         self._parser = TabularParser(OPTION_CHAIN_FIELDS, max_rows=max_rows)
         self._code_commit = code_commit
 
+    # ----------------------------------------------------------------- read
+    def _read(
+        self,
+        data: bytes,
+        mapping: ColumnMapping,
+        layout: TwoSidedLayout | None,
+        limit: int | None = None,
+    ) -> tuple[ParseResult, tuple[str, ...]]:
+        """Turn a file into parsed rows, resolving its layout first.
+
+        A two-sided chain is split into one record per quote *by column index*
+        before any name-based mapping runs, because the same header name
+        appears on the call side and the put side and a name-keyed reader keeps
+        only one of them -- silently giving every call the put's prices.
+
+        Returns the parsed rows and the columns that were read but not mapped
+        to any field, which differ per layout and so cannot be derived from the
+        mapping alone.
+        """
+        if layout is None:
+            result = self._parser.parse(data, mapping, limit=limit)
+            return result, mapping.unmapped_columns(result.headers)
+
+        records, headers = split_two_sided(data, layout)
+        # A preview limit counts source rows, so that the sample shows whole
+        # strikes rather than a call whose put was cut off.
+        capped = records if limit is None else records[: limit * 2]
+        result = self._parser.parse_records(
+            capped, headers, layout.identity_mapping(), limit=None if limit is None else limit * 2
+        )
+        claimed = {
+            layout.strike_column,
+            *layout.call_columns.values(),
+            *layout.put_columns.values(),
+            *layout.shared_columns.values(),
+        }
+        unmapped = tuple(
+            headers[index]
+            for index in range(len(headers))
+            if index not in claimed and headers[index]
+        )
+        return result, unmapped
+
     # -------------------------------------------------------------- preview
     def preview(
-        self, data: bytes, mapping: ColumnMapping, limit: int
+        self,
+        data: bytes,
+        mapping: ColumnMapping,
+        limit: int,
+        layout: TwoSidedLayout | None = None,
     ) -> tuple[ParseResult, tuple[str, ...]]:
         """Parse a sample without persisting anything.
 
@@ -187,8 +247,9 @@ class OptionChainIngestionPipeline:
         interpreted, because a misread column produces a plausible, wrong chain
         and no error at all.
         """
-        result = self._parser.parse(data, mapping, limit=limit)
-        return result, mapping.missing_required(OPTION_CHAIN_FIELDS)
+        result, _ = self._read(data, mapping, layout, limit=limit)
+        applied = layout.identity_mapping() if layout is not None else mapping
+        return result, applied.missing_required(OPTION_CHAIN_FIELDS)
 
     # --------------------------------------------------------------- ingest
     async def ingest(
@@ -197,8 +258,22 @@ class OptionChainIngestionPipeline:
         warnings: list[AnalyticalWarning] = []
         self._apply_carry_assumption(request)
 
-        parse_result = self._parser.parse(data, request.column_mapping)
+        parse_result, unmapped = self._read(data, request.column_mapping, request.layout)
         rows_input = parse_result.row_count + len(parse_result.errors)
+
+        if request.layout is not None:
+            warnings.append(
+                AnalyticalWarning.info(
+                    IngestionWarningCode.TWO_SIDED_LAYOUT,
+                    f"The file was read as a two-sided chain: each source row became one "
+                    f"call quote and one put quote, so {rows_input} quote row(s) came from "
+                    f"{rows_input // 2} source row(s). Row numbers below are source rows.",
+                    layout=str(ChainLayout.TWO_SIDED),
+                    header_row=request.layout.header_row,
+                    strike_column=request.layout.strike_column,
+                    expiry=(request.layout.expiry.isoformat() if request.layout.expiry else None),
+                )
+            )
 
         if parse_result.truncated:
             warnings.append(
@@ -208,7 +283,6 @@ class OptionChainIngestionPipeline:
                     rows_parsed=parse_result.row_count,
                 )
             )
-        unmapped = request.column_mapping.unmapped_columns(parse_result.headers)
         if unmapped:
             warnings.append(
                 AnalyticalWarning.info(

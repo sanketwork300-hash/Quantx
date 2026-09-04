@@ -171,6 +171,75 @@ Note what is **absent**: no `implied_volatility`, no `reference_value`, no
 Preview-before-import is mandatory in the UI: users must see how their columns
 were interpreted before any row is committed.
 
+### 7.1 Two-sided chain exports **[P0]**
+
+Every retail chain download -- NSE's option-chain page included -- is arranged
+one row per *strike* rather than one row per quote:
+
+```
+CALLS,,PUTS
+,OI,CHNG IN OI,VOLUME,IV,LTP,CHNG,BID QTY,BID,ASK,ASK QTY,STRIKE,BID QTY,BID,ASK,...
+,-,-,-,-,-,-,65,"1,877.00","1,925.30",65,"22,100.00","2,925",3.20,3.25,...
+```
+
+A `column_mapping` cannot describe this file, for a reason worth stating
+plainly: `BID`, `ASK`, `LTP`, `OI`, `VOLUME`, `BID QTY` and `ASK QTY` each
+appear **twice**, once per side, and a reader keyed by header name keeps only
+one column per name. Read that way the file loads without a single error and
+every *call* carries the *put's* bid and ask -- a complete, plausible, wrong
+chain. The side is carried by column *position*, so it is resolved by index
+before any name-based mapping runs.
+
+`POST /uploads/{id}/preview` detects the layout and returns it with the
+evidence for the reading:
+
+```http
+{
+  "detected_layout": {
+    "layout": "TWO_SIDED",
+    "two_sided": {"header_row": 1, "strike_column": 11,
+                  "call_columns": {"bid_price": 8, "ask_price": 9, ...},
+                  "put_columns": {"bid_price": 13, "ask_price": 14, ...},
+                  "expiry": "2026-09-15"},
+    "evidence": ["Row 2 is the header: it names a strike column and no option type.",
+                 "Column 11 ('STRIKE') separates the two sides.",
+                 "Row 1 was a banner, not data: 'CALLS', 'PUTS'.",
+                 "Header name(s) appear once per side and cannot be told apart by name: ASK, BID, LTP, OI, VOLUME."],
+    "unmapped_columns": ["CHNG IN OI", "IV", "CHNG", "CHNG", "IV", "CHNG IN OI"],
+    "suggested_expiry": "2026-09-15", "suggested_symbol": "NIFTY",
+    "suggestion_source": "filename"
+  }
+}
+```
+
+Pass the confirmed layout back on ingest, in place of `column_mapping`:
+
+```http
+POST /api/v1/uploads/{id}/ingest
+{"underlying": {...}, "as_of_timestamp": "...",
+ "layout": {"header_row": 1, "strike_column": 11,
+            "call_columns": {...}, "put_columns": {...},
+            "expiry": "2026-09-15"}}
+```
+
+Three properties of this path are deliberate:
+
+* **`layout.expiry` is required.** A chain export names its expiry in its
+  filename and in no column. The preview offers the filename's date as a
+  labelled `suggestion_source: "filename"`, and the user confirms it; a wrong
+  expiry silently moves every contract along the term structure.
+* **Each source row emits both sides, always.** A side that was not quoted is
+  rejected by the ordinary validator as `NO_PRICE_FIELDS` rather than dropped
+  during the split, so there is one exclusion rule and the row accounting stays
+  exact. `rows_input` is therefore twice the number of source rows, and the
+  ingestion warns `INGESTION_TWO_SIDED_LAYOUT` saying so.
+* **Row numbers stay the user's.** Both quotes from one line report that line,
+  because that is the row the user can open in their own spreadsheet.
+
+`IV` columns are reported in `unmapped_columns` and ignored: there is no
+`market_iv` field yet (see `docs/backlog.md`), and reporting them as ignored is
+the alternative to letting the user assume they were read.
+
 ```http
 POST /api/v1/uploads/{id}/ingest
 {
@@ -201,6 +270,7 @@ guessed:
 | `contract.multiplier` | recorded as `1` with a `MULTIPLIER_ASSUMED` flag and a warning. Greeks and margin scale with it, so it is never inferred from a symbol. |
 | `contract.expiry_time_utc` | the expiry *instant* stays unknown, so time to expiry is undefined and carry-dependent checks are skipped. |
 | `risk_free_rate` / `dividend_yield` | only the assumption-free option bounds run (`C <= S`, `P <= K`, `price >= 0`). Sub-intrinsic pricing is **not** checked, because without a discount curve a deep in-the-money European put legitimately trades below `K - S`. |
+| `underlying_price` | a chain export usually carries no spot column, so the spot must be supplied or `INGESTION_MISSING_UNDERLYING_PRICE` is raised and moneyness-dependent checks are skipped. |
 
 ## 8. Jobs **[P0]**
 

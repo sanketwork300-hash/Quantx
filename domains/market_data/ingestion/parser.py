@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -168,24 +169,45 @@ class TabularParser:
         text = data.decode("utf-8-sig", errors="replace")
         reader = csv.DictReader(io.StringIO(text))
         headers = [header.strip() for header in (reader.fieldnames or [])]
+        records = (
+            (row_number, {key: value for key, value in raw.items() if key is not None})
+            for row_number, raw in enumerate(reader, start=1)
+        )
+        return self.parse_records(records, headers, mapping, limit=limit)
 
+    def parse_records(
+        self,
+        records: Iterable[tuple[int, dict]],
+        headers: list[str],
+        mapping: ColumnMapping,
+        limit: int | None = None,
+    ) -> ParseResult:
+        """Coerce records that have already been resolved to columns.
+
+        Split out from :meth:`parse` so that a file whose layout cannot be
+        described by column *names* -- a two-sided option chain, where the same
+        header appears on the call side and the put side -- is resolved by
+        column index first and then runs through exactly this coercion. Two
+        readers of the same file that coerced values differently would be two
+        ingestion paths, and only one of them would be tested.
+
+        ``row_number`` is the caller's, not this method's: a two-sided splitter
+        emits two records from one line and both must report the line the user
+        can actually find in their spreadsheet.
+        """
         cap = min(limit, self._max_rows) if limit is not None else self._max_rows
         rows: list[ParsedRow] = []
         errors: list[RowError] = []
         truncated = False
 
-        for row_number, raw in enumerate(reader, start=1):
+        for row_number, raw in records:
             if len(rows) >= cap:
                 # Only a genuine overflow of the configured cap is truncation;
                 # a deliberate preview limit is not an error condition.
                 truncated = limit is None or cap == self._max_rows
                 break
 
-            cleaned = {
-                (key.strip() if key else ""): _clean(value)
-                for key, value in raw.items()
-                if key is not None
-            }
+            cleaned = {(key.strip() if key else ""): _clean(value) for key, value in raw.items()}
             try:
                 values = self._coerce_row(cleaned, mapping)
             except RowParseError as exc:

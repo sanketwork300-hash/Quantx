@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import PurePosixPath
@@ -17,6 +17,14 @@ from domains.market_data.ingestion.column_mapping import (
     OPTION_CHAIN_FIELDS,
     ColumnMapping,
     infer_mapping,
+)
+from domains.market_data.ingestion.layout import (
+    ChainLayout,
+    LayoutDetection,
+    TwoSidedLayout,
+)
+from domains.market_data.ingestion.layout import (
+    detect as detect_layout,
 )
 from domains.market_data.ingestion.parser import TabularParser
 from domains.market_data.ingestion.pipeline import (
@@ -70,6 +78,10 @@ class UploadPreview:
     unmapped_columns: tuple[str, ...]
     sample_rows: list[dict]
     parse_errors: list[dict]
+    #: How the file is arranged, and the evidence for that reading. A two-sided
+    #: chain cannot be described by a column mapping alone, so the user confirms
+    #: the layout here for the same reason they confirm the mapping.
+    detected_layout: LayoutDetection | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -81,6 +93,9 @@ class UploadPreview:
             "unmapped_columns": list(self.unmapped_columns),
             "sample_rows": self.sample_rows,
             "parse_errors": self.parse_errors,
+            "detected_layout": (
+                self.detected_layout.to_dict() if self.detected_layout is not None else None
+            ),
         }
 
 
@@ -214,30 +229,71 @@ class MarketDataService:
         upload: UploadORM,
         mapping: ColumnMapping | None = None,
         limit: int | None = None,
+        layout: TwoSidedLayout | None = None,
     ) -> UploadPreview:
+        """Show how the file would be read. Persists nothing.
+
+        The layout is resolved before the column mapping, because a two-sided
+        chain export repeats every header name once per side and so cannot be
+        described by names at all. When the caller does not name a layout, one
+        is detected and offered with its evidence -- a suggestion on exactly the
+        same footing as an inferred mapping, confirmed by the user before any
+        commit.
+        """
         data = await self.read_upload(upload)
         headers = TabularParser.read_headers(data)
 
-        inferred = infer_mapping(headers, OPTION_CHAIN_FIELDS)
-        applied = mapping or inferred
+        detection = detect_layout(data, filename=upload.original_filename)
+        applied_layout = layout
+        if applied_layout is None and detection.layout is ChainLayout.TWO_SIDED:
+            applied_layout = replace(detection.two_sided, expiry=detection.suggested_expiry)
+
+        if applied_layout is not None:
+            inferred = applied_layout.identity_mapping()
+            applied = mapping or inferred
+            file_headers = list(detection.headers) or headers
+        else:
+            inferred = infer_mapping(headers, OPTION_CHAIN_FIELDS)
+            applied = mapping or inferred
+            file_headers = headers
 
         pipeline = self._pipeline()
         parse_result, missing = pipeline.preview(
-            data, applied, limit or self._settings.upload_preview_rows
+            data,
+            applied,
+            limit or self._settings.upload_preview_rows,
+            layout=applied_layout,
         )
+        if applied_layout is not None:
+            claimed = {
+                applied_layout.strike_column,
+                *applied_layout.call_columns.values(),
+                *applied_layout.put_columns.values(),
+                *applied_layout.shared_columns.values(),
+            }
+            unmapped = tuple(
+                name for index, name in enumerate(file_headers) if index not in claimed and name
+            )
+        else:
+            unmapped = applied.unmapped_columns(parse_result.headers)
 
         return UploadPreview(
             upload_id=upload.id,
-            headers=parse_result.headers or headers,
+            headers=parse_result.headers or file_headers,
             inferred_mapping=inferred.to_dict(),
             applied_mapping=applied.to_dict(),
             missing_required=missing,
-            unmapped_columns=applied.unmapped_columns(parse_result.headers),
+            unmapped_columns=unmapped,
             sample_rows=[
                 {key: _jsonable(value) for key, value in row.values.items()}
                 for row in parse_result.rows
             ],
             parse_errors=[error.to_dict() for error in parse_result.errors],
+            detected_layout=(
+                replace(detection, two_sided=applied_layout)
+                if applied_layout is not None
+                else detection
+            ),
         )
 
     # -------------------------------------------------------------- ingestion

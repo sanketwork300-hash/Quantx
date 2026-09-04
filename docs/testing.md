@@ -259,6 +259,26 @@ moment something portfolio-level and non-additive — netted margin, in Phase 6 
 enters the revaluation, and it is better for a test to say so than for a number
 to quietly change.
 
+### Testing a file that loads cleanly and is wrong
+
+`tests/unit/test_chain_layout.py` and `tests/integration/test_two_sided_chain.py`
+guard a failure with no error message. An exchange option-chain export puts
+calls to the left of `STRIKE` and puts to the right, repeating `BID`, `ASK`,
+`LTP`, `OI` and `VOLUME` once per side. Read by header name, `csv.DictReader`
+keeps the last column of each repeated name: the file parses, every row
+validates, the snapshot's row accounting balances, and every call carries the
+put's bid and ask.
+
+Nothing downstream can detect this. The implied volatilities converge, the
+smile fits, the surface calibrates, and every number is wrong. So the assertion
+is made where the mistake would be made — `test_the_call_keeps_the_call_price_and_the_put_keeps_the_put_price`
+and `test_no_strike_has_the_same_quote_on_both_sides` — rather than on a
+downstream quantity that would absorb it silently.
+
+The companion assertion is that the *long-form* path is unchanged
+(`test_a_long_form_file_is_left_alone`), because a layout detector that starts
+claiming ordinary files is the way this fix would itself become the bug.
+
 ## 5. Regression / golden files
 
 Committed fixtures with committed expected outputs:

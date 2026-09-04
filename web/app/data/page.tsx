@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { Disclaimer, ErrorBanner, ScoreTag, SeverityTag } from "@/components/Ui";
-import type { Job, JobResult, Preview, Upload } from "@/lib/types";
+import type { DetectedLayout, Job, JobResult, Preview, Upload } from "@/lib/types";
 
 const REQUIRED = ["strike", "option_type", "expiry"];
 
@@ -15,6 +15,11 @@ export default function DataPage() {
   const [upload, setUpload] = useState<Upload | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
+  // A two-sided chain export is described by column position, not by column
+  // name, so it carries its own reading. Held separately from `mapping`
+  // because exactly one of the two describes any given file.
+  const [layout, setLayout] = useState<DetectedLayout["two_sided"] | null>(null);
+  const [expiry, setExpiry] = useState("");
   const [symbol, setSymbol] = useState("NIFTY");
   const [exchange, setExchange] = useState("SYNTH");
   const [asOf, setAsOf] = useState("2026-09-24T09:20");
@@ -43,6 +48,11 @@ export default function DataPage() {
       setUpload(created);
       setPreview(previewed);
       setMapping(previewed.applied_mapping);
+      const detected = previewed.detected_layout;
+      const twoSided = detected?.layout === "TWO_SIDED" ? detected.two_sided : null;
+      setLayout(twoSided);
+      setExpiry(twoSided?.expiry ?? detected?.suggested_expiry ?? "");
+      if (detected?.suggested_symbol) setSymbol(detected.suggested_symbol);
       queryClient.invalidateQueries({ queryKey: ["uploads"] });
     },
   });
@@ -56,7 +66,11 @@ export default function DataPage() {
           kind: "OPTION_CHAIN",
           underlying: { symbol, exchange, asset_class: "INDEX", currency: "INR" },
           as_of_timestamp: new Date(asOf).toISOString(),
-          column_mapping: mapping,
+          // Exactly one of these describes the file. A two-sided export has to
+          // be resolved by column index, because its header names repeat once
+          // per side and cannot say which side a column belongs to.
+          column_mapping: layout ? {} : mapping,
+          layout: layout ? { ...layout, expiry } : null,
           risk_free_rate: rate === "" ? null : Number(rate),
           dividend_yield: rate === "" ? null : 0,
           contract: {
@@ -88,7 +102,11 @@ export default function DataPage() {
     enabled: job.data?.status === "COMPLETED",
   });
 
-  const missing = REQUIRED.filter((field) => !mapping[field]);
+  const missing = layout
+    ? expiry === ""
+      ? ["expiry"]
+      : []
+    : REQUIRED.filter((field) => !mapping[field]);
   const summary = jobResult.data?.result?.results;
 
   return (
@@ -123,9 +141,11 @@ export default function DataPage() {
 
       {preview && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>2. Confirm the column mapping</h3>
+          <h3 style={{ marginTop: 0 }}>
+            2. Confirm how the file was read
+          </h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            Inference is a suggestion. A misread column produces a plausible,
+            This reading is a suggestion. A misread column produces a plausible,
             wrong chain and no error at all, so confirm it here.
           </p>
 
@@ -135,7 +155,84 @@ export default function DataPage() {
             </div>
           )}
 
-          <div className="grid">
+          {layout && preview.detected_layout && (
+            <>
+              <div className="banner">
+                Read as a two-sided chain: one row per strike, calls to the left
+                of column {layout.strike_column}, puts to the right. Each row
+                becomes one call quote and one put quote.
+              </div>
+              <ul className="muted" style={{ marginTop: 8 }}>
+                {preview.detected_layout.evidence.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+
+              <div className="field" style={{ maxWidth: 280 }}>
+                <label htmlFor="expiry">expiry *</label>
+                <input
+                  id="expiry"
+                  type="date"
+                  value={expiry}
+                  onChange={(event) => setExpiry(event.target.value)}
+                />
+                <p className="muted" style={{ marginBottom: 0 }}>
+                  {preview.detected_layout.suggestion_source
+                    ? `Suggested from the ${preview.detected_layout.suggestion_source}, not from any column in the file. Check it: a wrong expiry moves every contract along the term structure.`
+                    : "No expiry column and no filename hint. Supply it."}
+                </p>
+              </div>
+
+              <div className="table-wrap" style={{ maxHeight: 260 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>field</th>
+                      <th>call column</th>
+                      <th>put column</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>strike</td>
+                      <td colSpan={2} className="mono">
+                        {layout.strike_column} ·{" "}
+                        {preview.headers[layout.strike_column]}
+                      </td>
+                    </tr>
+                    {Array.from(
+                      new Set([
+                        ...Object.keys(layout.call_columns),
+                        ...Object.keys(layout.put_columns),
+                      ]),
+                    )
+                      .sort()
+                      .map((field) => {
+                        const call = layout.call_columns[field];
+                        const put = layout.put_columns[field];
+                        return (
+                          <tr key={field}>
+                            <td>{field}</td>
+                            <td className="mono">
+                              {call === undefined
+                                ? "—"
+                                : `${call} · ${preview.headers[call]}`}
+                            </td>
+                            <td className="mono">
+                              {put === undefined
+                                ? "—"
+                                : `${put} · ${preview.headers[put]}`}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          <div className="grid" hidden={layout !== null}>
             {Object.keys(preview.inferred_mapping).length === 0 && (
               <div className="muted">No columns could be inferred.</div>
             )}
@@ -181,7 +278,8 @@ export default function DataPage() {
 
           {preview.unmapped_columns.length > 0 && (
             <p className="muted">
-              Ignored columns: {preview.unmapped_columns.join(", ")}
+              Ignored columns: {preview.unmapped_columns.join(", ")}. Nothing
+              was read from them.
             </p>
           )}
 

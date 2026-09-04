@@ -396,3 +396,23 @@ Format per build spec §96.
 4. Preserve copyright and licence notices in the copied file.
 5. Prefer implementing from the academic specification and validating against the
    library instead, which is the default choice throughout this project.
+
+---
+
+## Two-sided option-chain layout detection
+
+**Source:** none. This is a file-format concern, not a quantitative one: the
+arrangement of NSE's option-chain download (and of every comparable retail
+export) is an observed convention of those files, not a published methodology.
+
+**Decision:** `IMPLEMENT INDEPENDENTLY`
+
+**Reasoning:** libraries that scrape NSE exist (`nsepy`, `nsetools` and
+successors) and all of them hard-code the column order of a particular vintage
+of the site. Adopting one would import a silent breakage every time the export
+changes shape, and would place a fabricated layout at the very bottom of the
+data path. Detection here asserts only what it can see in the file -- one
+strike column, a priced block on each side, no option-type column -- reports
+the evidence, and asks the user to confirm. Nothing about the file is assumed
+in the absence of that confirmation, and the expiry, which no column carries,
+is required from the caller rather than inferred.

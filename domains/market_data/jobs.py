@@ -16,6 +16,7 @@ from domains.instruments.enums import (
 from domains.jobs.handlers import register
 from domains.jobs.models import Job, JobType
 from domains.market_data.ingestion.column_mapping import ColumnMapping
+from domains.market_data.ingestion.layout import TwoSidedLayout
 from domains.market_data.ingestion.pipeline import (
     ContractSpec,
     IngestionOptions,
@@ -52,6 +53,11 @@ async def ingest_option_chain(session: AsyncSession, job: Job) -> dict:
         ),
         as_of=datetime.fromisoformat(payload["as_of_timestamp"]),
         column_mapping=ColumnMapping(mapping=dict(payload["column_mapping"])),
+        layout=(
+            TwoSidedLayout.from_dict(payload["layout"])
+            if payload.get("layout") is not None
+            else None
+        ),
         contract=ContractSpec(
             multiplier=(
                 Decimal(contract["multiplier"]) if contract.get("multiplier") is not None else None

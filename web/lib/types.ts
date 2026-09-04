@@ -105,6 +105,34 @@ export interface Upload {
   created_at: string;
 }
 
+/** Where each side of a two-sided chain sits, by 0-based column index.
+ *
+ *  Indices rather than header names because the names cannot tell the sides
+ *  apart: a chain export repeats BID, ASK, LTP and the rest once per side.
+ */
+export interface TwoSidedLayout {
+  header_row: number;
+  strike_column: number;
+  call_columns: Record<string, number>;
+  put_columns: Record<string, number>;
+  shared_columns: Record<string, number>;
+  /** Named by no column in the file; confirmed by the user before ingest. */
+  expiry: string | null;
+}
+
+export interface DetectedLayout {
+  layout: "LONG" | "TWO_SIDED";
+  headers: string[];
+  two_sided: TwoSidedLayout | null;
+  /** Why the file was read this way, in the user's terms. Always shown. */
+  evidence: string[];
+  unmapped_columns: string[];
+  suggested_expiry: string | null;
+  suggested_symbol: string | null;
+  /** Where a suggestion came from, e.g. "filename". Never a data column. */
+  suggestion_source: string | null;
+}
+
 export interface Preview {
   upload_id: string;
   headers: string[];
@@ -114,6 +142,7 @@ export interface Preview {
   unmapped_columns: string[];
   sample_rows: Record<string, unknown>[];
   parse_errors: { row_number: number; column: string | null; message: string }[];
+  detected_layout: DetectedLayout | null;
 }
 
 export interface Job {

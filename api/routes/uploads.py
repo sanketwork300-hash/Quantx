@@ -26,6 +26,7 @@ from domains.market_data.ingestion.column_mapping import (
     OPTION_CHAIN_FIELDS,
     ColumnMapping,
 )
+from domains.market_data.ingestion.layout import LayoutError, TwoSidedLayout
 from domains.market_data.service import UploadRejected
 from domains.users.models import AuditAction
 from domains.users.service import UserService
@@ -114,8 +115,26 @@ async def preview_upload(
         if payload.column_mapping is not None
         else None
     )
-    preview = await market_data.preview_upload(upload, mapping, limit=payload.limit)
+    try:
+        layout = _layout(payload.layout)
+    except LayoutError as exc:
+        raise UnprocessableEntity("INVALID_LAYOUT", str(exc)) from exc
+    preview = await market_data.preview_upload(upload, mapping, limit=payload.limit, layout=layout)
     return PreviewResponse(**preview.to_dict())
+
+
+def _layout(payload) -> TwoSidedLayout | None:
+    """Build the layout the caller confirmed, or ``None`` for a long-form file."""
+    if payload is None:
+        return None
+    return TwoSidedLayout(
+        header_row=payload.header_row,
+        strike_column=payload.strike_column,
+        call_columns=dict(payload.call_columns),
+        put_columns=dict(payload.put_columns),
+        shared_columns=dict(payload.shared_columns),
+        expiry=payload.expiry,
+    )
 
 
 @router.post(
@@ -163,7 +182,18 @@ async def ingest_upload(
             f"Ingestion of {payload.kind} is not implemented yet; see docs/backlog.md.",
         )
 
-    mapping = ColumnMapping(mapping=dict(payload.column_mapping))
+    try:
+        layout = _layout(payload.layout)
+    except LayoutError as exc:
+        raise UnprocessableEntity("INVALID_LAYOUT", str(exc)) from exc
+
+    # A two-sided file is resolved by column index, so the layout *is* the
+    # mapping for it and the two must not both be asserted.
+    mapping = (
+        layout.identity_mapping()
+        if layout is not None
+        else ColumnMapping(mapping=dict(payload.column_mapping))
+    )
     missing = mapping.missing_required(OPTION_CHAIN_FIELDS)
     if missing:
         raise UnprocessableEntity(
@@ -180,6 +210,7 @@ async def ingest_upload(
             "underlying": payload.underlying.model_dump(mode="json"),
             "as_of_timestamp": payload.as_of_timestamp.isoformat(),
             "column_mapping": mapping.to_dict(),
+            "layout": layout.to_dict() if layout is not None else None,
             "underlying_price": (
                 format(payload.underlying_price, "f")
                 if payload.underlying_price is not None
