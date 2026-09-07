@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 
 from fastapi import APIRouter, File, Form, Query, UploadFile, status
 
@@ -25,8 +26,13 @@ from domains.market_data.enums import UploadKind
 from domains.market_data.ingestion.column_mapping import (
     OPTION_CHAIN_FIELDS,
     ColumnMapping,
+    infer_mapping,
 )
-from domains.market_data.ingestion.layout import LayoutError, TwoSidedLayout
+from domains.market_data.ingestion.layout import (
+    ChainLayout,
+    LayoutError,
+    TwoSidedLayout,
+)
 from domains.market_data.service import UploadRejected
 from domains.users.models import AuditAction
 from domains.users.service import UserService
@@ -187,13 +193,45 @@ async def ingest_upload(
     except LayoutError as exc:
         raise UnprocessableEntity("INVALID_LAYOUT", str(exc)) from exc
 
+    supplied = ColumnMapping(mapping=dict(payload.column_mapping))
+    detection = None
+    mapping_inferred = False
+    if layout is None and not payload.column_mapping:
+        # Nothing at all was said about the file -- the ordinary case for a user
+        # who downloaded a chain from an exchange and uploaded it. Rather than
+        # reject it field by field, read how it is actually arranged: a
+        # two-sided export names its columns once per side and so can never be
+        # described by a mapping at all. What was worked out is reported in the
+        # result's warnings, with its evidence, because a misread file is
+        # plausible rather than loud. A *partial* mapping is still an
+        # instruction and is answered with the fields it is missing.
+        found = await market_data.detect_upload_layout(upload)
+        if found.layout is ChainLayout.TWO_SIDED and found.two_sided is not None:
+            if found.suggested_expiry is None:
+                raise UnprocessableEntity(
+                    "LAYOUT_EXPIRY_REQUIRED",
+                    "This file is a two-sided chain export: calls to the left of the "
+                    "strike column, puts to the right. It names no expiry in any "
+                    "column and none could be read from its filename, so the expiry "
+                    "cannot be established from the upload. Preview the file and "
+                    "supply layout.expiry.",
+                    evidence=list(found.evidence),
+                )
+            detection = found
+            layout = replace(found.two_sided, expiry=found.suggested_expiry)
+        else:
+            # A long-form file whose columns were never named: match each field
+            # to a column by header name, the same step the preview shows. A
+            # mapping that still cannot read the file falls through to the
+            # error below, which names the fields that are missing.
+            inferred = infer_mapping(list(found.headers), OPTION_CHAIN_FIELDS)
+            if not inferred.missing_required(OPTION_CHAIN_FIELDS):
+                supplied = inferred
+                mapping_inferred = True
+
     # A two-sided file is resolved by column index, so the layout *is* the
     # mapping for it and the two must not both be asserted.
-    mapping = (
-        layout.identity_mapping()
-        if layout is not None
-        else ColumnMapping(mapping=dict(payload.column_mapping))
-    )
+    mapping = layout.identity_mapping() if layout is not None else supplied
     missing = mapping.missing_required(OPTION_CHAIN_FIELDS)
     if missing:
         raise UnprocessableEntity(
@@ -211,6 +249,11 @@ async def ingest_upload(
             "as_of_timestamp": payload.as_of_timestamp.isoformat(),
             "column_mapping": mapping.to_dict(),
             "layout": layout.to_dict() if layout is not None else None,
+            # Present only when the layout was read from the file rather than
+            # named by the caller. It carries the evidence, which the result
+            # reports: a misread layout is plausible rather than loud.
+            "layout_detection": detection.to_dict() if detection is not None else None,
+            "column_mapping_inferred": mapping_inferred,
             "underlying_price": (
                 format(payload.underlying_price, "f")
                 if payload.underlying_price is not None

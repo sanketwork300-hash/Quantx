@@ -222,12 +222,49 @@ POST /api/v1/uploads/{id}/ingest
             "expiry": "2026-09-15"}}
 ```
 
-Three properties of this path are deliberate:
+**Or pass neither.** A request that carries no `layout` and no `column_mapping`
+is read the way the preview would have read it -- layout first, then column
+mapping -- so a user who uploads a download and says nothing about it gets their
+chain rather than a rejected row per strike:
 
-* **`layout.expiry` is required.** A chain export names its expiry in its
+```http
+POST /api/v1/uploads/{id}/ingest
+{"underlying": {"symbol": "NIFTY", "exchange": "NSE"},
+ "as_of_timestamp": "2026-09-24T09:20:00Z"}
+```
+
+This applies to long-form files too: with no mapping given, each field is
+matched to a column by header name, exactly as `preview` reports in
+`inferred_mapping`.
+
+It is a fallback, not a policy. It runs **only** when the caller named no layout
+and supplied no mapping at all. A *partial* mapping is still an instruction, and
+is answered with `COLUMN_MAPPING_INCOMPLETE` naming the fields it is missing --
+a caller who says something about their file knows something a header scan does
+not, and is never overridden by a guess. A file whose headers match no required
+field is refused the same way.
+
+What was worked out travels with the result:
+
+* `INGESTION_LAYOUT_AUTO_DETECTED` (WARNING) carries the same `evidence` the
+  preview shows, plus the resolved `call_columns` and `put_columns`.
+* `INGESTION_MAPPING_INFERRED` (WARNING) carries the mapping that was matched by
+  header name.
+* `INGESTION_EXPIRY_FROM_FILENAME` (WARNING) names the date used and where it
+  came from.
+* `provenance.parameters.layout` and `provenance.parameters.column_mapping`
+  record what was actually applied, not what the request asked for.
+
+Four properties of this path are deliberate:
+
+* **An expiry is never invented.** A chain export names its expiry in its
   filename and in no column. The preview offers the filename's date as a
-  labelled `suggestion_source: "filename"`, and the user confirms it; a wrong
-  expiry silently moves every contract along the term structure.
+  labelled `suggestion_source: "filename"`; on commit that same hint is applied
+  and reported, because the alternative is rejecting every row of a readable
+  file. A file whose name carries no date is refused with
+  `LAYOUT_EXPIRY_REQUIRED` rather than dated with something plausible -- a wrong
+  expiry silently moves every contract along the term structure. Supplying
+  `layout` explicitly still requires `layout.expiry`.
 * **Each source row emits both sides, always.** A side that was not quoted is
   rejected by the ordinary validator as `NO_PRICE_FIELDS` rather than dropped
   during the split, so there is one exclusion rule and the row accounting stays
@@ -235,6 +272,10 @@ Three properties of this path are deliberate:
   ingestion warns `INGESTION_TWO_SIDED_LAYOUT` saying so.
 * **Row numbers stay the user's.** Both quotes from one line report that line,
   because that is the row the user can open in their own spreadsheet.
+* **The reading is pinned when the job is submitted.** A detected layout is
+  stored with the job, so the worker reads the file exactly the way the caller
+  was told it would be read rather than detecting a second time, possibly
+  differently.
 
 `IV` columns are reported in `unmapped_columns` and ignored: there is no
 `market_iv` field yet (see `docs/backlog.md`), and reporting them as ignored is

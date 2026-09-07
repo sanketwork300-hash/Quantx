@@ -232,3 +232,88 @@ class TestTheCallsKeptTheCallPrices:
         rows = {(q["option_type"], float(q["strike"])): q["source_row_number"] for q in quotes}
         assert rows[("CALL", 22100.0)] == rows[("PUT", 22100.0)] == 1
         assert rows[("CALL", 23000.0)] == 2
+
+
+class TestTheFileIsReadWithoutBeingDescribed:
+    """Commit with nothing supplied but the file: no mapping, no layout.
+
+    A user who downloads a chain and uploads it has nothing to say about its
+    columns, and the previous behaviour was to reject all 84 rows with
+    ``required field 'strike' is not mapped to a column``. The layout is read
+    from the file instead -- and reported, with its evidence, because a misread
+    layout produces a plausible chain rather than an error.
+    """
+
+    @pytest.fixture
+    async def ingested_blind(self, client, auth_header):
+        record = await upload(client, auth_header)
+        response = await client.post(
+            f"/uploads/{record['id']}/ingest",
+            headers={"Authorization": auth_header},
+            json={
+                "underlying": {"symbol": "NIFTY", "exchange": "NSE", "currency": "INR"},
+                "as_of_timestamp": AS_OF,
+                "underlying_price": "23980",
+                "contract": {"expiry_time_utc": "10:00:00"},
+            },
+        )
+        assert response.status_code == 202, response.text
+        job_id = response.json()["job_id"]
+        job = await client.get(f"/jobs/{job_id}", headers={"Authorization": auth_header})
+        assert job.json()["status"] == "COMPLETED", job.text
+        result = await client.get(f"/jobs/{job_id}/result", headers={"Authorization": auth_header})
+        return result.json()["result"]
+
+    async def test_the_chain_loads_without_a_mapping_or_a_layout(self, ingested_blind):
+        counts = ingested_blind["results"]["counts"]
+        assert counts["input"] == SOURCE_ROWS * 2
+        assert counts["rejected"] == 0
+
+    async def test_rows_are_still_conserved(self, ingested_blind):
+        counts = ingested_blind["results"]["counts"]
+        assert counts["input"] == counts["kept"] + counts["excluded"] + counts["rejected"]
+
+    async def test_the_detection_is_reported_with_its_evidence(self, ingested_blind):
+        warning = next(
+            w for w in ingested_blind["warnings"] if w["code"] == "INGESTION_LAYOUT_AUTO_DETECTED"
+        )
+        assert warning["severity"] == "WARNING"
+        assert "STRIKE" in " ".join(warning["context"]["evidence"])
+
+    async def test_the_expiry_says_it_came_from_the_filename(self, ingested_blind):
+        warning = next(
+            w for w in ingested_blind["warnings"] if w["code"] == "INGESTION_EXPIRY_FROM_FILENAME"
+        )
+        assert warning["context"]["expiry"] == "2026-09-15"
+        assert warning["context"]["source"] == "filename"
+
+    async def test_the_provenance_records_the_layout_that_was_actually_used(self, ingested_blind):
+        layout = ingested_blind["provenance"]["parameters"]["layout"]
+        assert layout["strike_column"] == 11
+        assert layout["expiry"] == "2026-09-15"
+
+    async def test_the_calls_still_keep_the_call_prices(self, client, auth_header, ingested_blind):
+        snapshot_id = ingested_blind["results"]["snapshot_id"]
+        response = await client.get(
+            f"/market/chains/{snapshot_id}?include_excluded=true",
+            headers={"Authorization": auth_header},
+        )
+        quotes = response.json()["results"]["quotes"]
+        call = next(
+            q for q in quotes if q["option_type"] == "CALL" and float(q["strike"]) == 22100.0
+        )
+        assert float(call["bid_price"]) == 1877.00
+
+    async def test_a_file_whose_expiry_is_nowhere_is_refused_not_guessed(self, client, auth_header):
+        """No expiry column, no date in the name: the expiry is simply unknown."""
+        record = await upload(client, auth_header, filename="option-chain.csv")
+        response = await client.post(
+            f"/uploads/{record['id']}/ingest",
+            headers={"Authorization": auth_header},
+            json={
+                "underlying": {"symbol": "NIFTY", "exchange": "NSE", "currency": "INR"},
+                "as_of_timestamp": AS_OF,
+            },
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["code"] == "LAYOUT_EXPIRY_REQUIRED"

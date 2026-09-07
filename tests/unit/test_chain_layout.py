@@ -265,3 +265,85 @@ class TestFilenameHints:
         assert detection.suggested_expiry == EXPIRY
         assert detection.suggestion_source == "filename"
         assert detection.two_sided.expiry is None
+
+
+class TestReadingAFileTheCallerDidNotDescribe:
+    """The commit path when the user uploads a download and says nothing.
+
+    Working the reading out is a fallback, not a policy: it runs only when the
+    caller named no layout and supplied no mapping at all. A caller who states a
+    mapping knows something about their file that a header scan does not, and is
+    never overridden by a guess -- an incomplete instruction is answered with the
+    field it is missing, not with a different reading of the file.
+    """
+
+    @staticmethod
+    def pipeline():
+        from domains.market_data.ingestion.pipeline import OptionChainIngestionPipeline
+
+        # Reading a file touches neither of these; resolution is pure.
+        return OptionChainIngestionPipeline(instrument_service=None, repository=None)
+
+    def resolve(self, data: bytes, mapping: dict, filename: str | None = None, layout=None):
+        from domains.market_data.ingestion.column_mapping import ColumnMapping
+
+        return self.pipeline()._resolve_reading(
+            data, ColumnMapping(mapping=mapping), layout, filename
+        )
+
+    def test_an_undescribed_two_sided_file_is_read_rather_than_rejected(self):
+        plan = self.resolve(nse_bytes(), {}, "option-chain-NIFTY-15-Sep-2026.csv")
+        assert plan.layout is not None
+        assert plan.layout.strike_column == 11
+        assert plan.detection.layout is ChainLayout.TWO_SIDED
+        assert plan.auto_detected
+
+    def test_the_expiry_the_filename_carries_is_applied_and_attributed(self):
+        plan = self.resolve(nse_bytes(), {}, "option-chain-NIFTY-15-Sep-2026.csv")
+        assert plan.layout.expiry == EXPIRY
+        assert plan.detection.suggestion_source == "filename"
+
+    def test_an_expiry_that_is_nowhere_is_left_unknown(self):
+        """Nothing plausible is substituted; the caller has to supply it."""
+        plan = self.resolve(nse_bytes(), {}, "option-chain.csv")
+        assert plan.layout.expiry is None
+
+    def test_a_caller_who_gave_a_workable_mapping_is_not_second_guessed(self):
+        mapping = {"strike": "STRIKE", "option_type": "CE_PE", "expiry": "EXPIRY_DT"}
+        plan = self.resolve(nse_bytes(), mapping, "chain-15-Sep-2026.csv")
+        assert plan.layout is None
+        assert plan.detection is None
+        assert plan.mapping.to_dict() == mapping
+
+    def test_a_partial_mapping_is_an_instruction_too(self):
+        """Answered with the field it is missing, not with a different reading."""
+        plan = self.resolve(nse_bytes(), {"strike": "STRIKE"}, "chain-15-Sep-2026.csv")
+        assert plan.layout is None
+        assert plan.detection is None
+        assert set(plan.mapping.missing_required(OPTION_CHAIN_FIELDS)) == {
+            "option_type",
+            "expiry",
+        }
+
+    def test_a_layout_the_caller_named_is_used_verbatim(self):
+        named = confirmed()
+        plan = self.resolve(nse_bytes(), {}, "chain-01-Jan-2027.csv", layout=named)
+        assert plan.layout is named
+
+    def test_a_long_form_file_is_not_turned_into_a_two_sided_one(self):
+        plan = self.resolve(LONG_FORM.encode(), {}, "chain-15-Sep-2026.csv")
+        assert plan.layout is None
+        assert plan.detection.layout is ChainLayout.LONG
+
+    def test_a_long_form_file_gets_its_columns_matched_by_name(self):
+        """The same inference the preview shows, applied when nothing was said."""
+        plan = self.resolve(LONG_FORM.encode(), {}, "chain-15-Sep-2026.csv")
+        assert plan.mapping_inferred
+        assert plan.mapping.to_dict()["strike"] == "STRIKE_PRICE"
+        assert plan.mapping.to_dict()["option_type"] == "CE_PE"
+
+    def test_a_file_whose_columns_mean_nothing_is_left_unread(self):
+        """Inference that cannot find a required field reports it, not a guess."""
+        plan = self.resolve(b"a,b,c\n1,2,3\n", {}, "chain-15-Sep-2026.csv")
+        assert not plan.mapping_inferred
+        assert plan.mapping.missing_required(OPTION_CHAIN_FIELDS)

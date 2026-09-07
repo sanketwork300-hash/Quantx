@@ -66,7 +66,10 @@ the provider interface, CSV and seeded-synthetic providers, canonical quote
 schemas, the **data-quality engine**, and the **option-chain ingestion
 pipeline** -- which reads both a long-form file and the **two-sided layout**
 every exchange chain export uses, where calls sit left of the strike and puts
-right of it under the same repeated header names. Asynchronous jobs.
+right of it under the same repeated header names. A file uploaded with nothing
+said about it is read as it is actually arranged, with the evidence for that
+reading reported in the result and recorded in its provenance. Asynchronous
+jobs.
 
 **Phase 1 — options MVP.**
 Day-count conventions and an explicit time-to-expiry policy. Content-addressed

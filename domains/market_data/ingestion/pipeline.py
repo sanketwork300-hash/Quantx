@@ -31,10 +31,15 @@ from domains.instruments.service import InstrumentService
 from domains.market_data.ingestion.column_mapping import (
     OPTION_CHAIN_FIELDS,
     ColumnMapping,
+    infer_mapping,
 )
 from domains.market_data.ingestion.layout import (
     ChainLayout,
+    LayoutDetection,
     TwoSidedLayout,
+)
+from domains.market_data.ingestion.layout import (
+    detect as detect_layout,
 )
 from domains.market_data.ingestion.layout import (
     split as split_two_sided,
@@ -78,6 +83,9 @@ class IngestionWarningCode:
     MULTIPLIER_ASSUMED = "INGESTION_MULTIPLIER_ASSUMED"
     UNMAPPED_COLUMNS = "INGESTION_UNMAPPED_COLUMNS"
     TWO_SIDED_LAYOUT = "INGESTION_TWO_SIDED_LAYOUT"
+    LAYOUT_AUTO_DETECTED = "INGESTION_LAYOUT_AUTO_DETECTED"
+    MAPPING_INFERRED = "INGESTION_MAPPING_INFERRED"
+    EXPIRY_FROM_FILENAME = "INGESTION_EXPIRY_FROM_FILENAME"
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +141,19 @@ class OptionChainIngestionRequest:
     #: must be resolved before the name-based ``column_mapping`` can apply. The
     #: layout also carries the expiry, which such a file names in no column.
     layout: TwoSidedLayout | None = None
+    #: Set when ``layout`` was detected from the file rather than named by the
+    #: caller. It carries the evidence for that reading, which is reported in
+    #: the result's warnings: a misread layout produces a plausible chain and
+    #: no error, so the reasoning has to travel with the result.
+    layout_detection: LayoutDetection | None = None
+    #: Set when ``column_mapping`` was matched to the file's headers rather than
+    #: named by the caller. Reported for the same reason a detected layout is:
+    #: a column taken for the wrong field produces a plausible chain.
+    mapping_inferred: bool = False
+    #: Original name of the uploaded file. A two-sided export names its expiry
+    #: in no column, and the filename is the only place it appears; it is read
+    #: as a *hint*, reported as one, never as a fact from the data.
+    filename: str | None = None
     upload_id: uuid.UUID | None = None
     dataset_digest: str | None = None
     provider: str = "csv"
@@ -174,6 +195,37 @@ class IngestionSummary:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ReadingPlan:
+    """How a file will be read, and whether that was said or worked out.
+
+    The layout is resolved before the mapping, because a two-sided chain repeats
+    every header name once per side and so cannot be described by names at all.
+    ``detection`` is present whenever the reading was worked out rather than
+    stated, and carries the evidence for it.
+    """
+
+    layout: TwoSidedLayout | None
+    mapping: ColumnMapping
+    detection: LayoutDetection | None = None
+    mapping_inferred: bool = False
+
+    @property
+    def auto_detected(self) -> bool:
+        return self.detection is not None and self.layout is not None
+
+
+def _applied_mapping(
+    request: OptionChainIngestionRequest, plan: ReadingPlan | None
+) -> ColumnMapping:
+    """The mapping the file was actually read with."""
+    if plan is None:
+        return request.column_mapping
+    if plan.layout is not None:
+        return plan.layout.identity_mapping()
+    return plan.mapping
+
+
 class OptionChainIngestionPipeline:
     def __init__(
         self,
@@ -191,6 +243,57 @@ class OptionChainIngestionPipeline:
         self._code_commit = code_commit
 
     # ----------------------------------------------------------------- read
+    def _resolve_reading(
+        self,
+        data: bytes,
+        mapping: ColumnMapping,
+        layout: TwoSidedLayout | None,
+        filename: str | None,
+        detection: LayoutDetection | None = None,
+        mapping_inferred: bool = False,
+    ) -> ReadingPlan:
+        """Work out how to read the file when the caller did not say.
+
+        This runs only when the caller named no layout and supplied no mapping
+        at all. An instruction is never overridden by a guess, and a *partial*
+        mapping is still an instruction: the caller knows something about their
+        file that a header scan does not, and the useful answer to an incomplete
+        one is which field is missing, not a different reading.
+
+        A user who downloads a chain from an exchange and uploads it has nothing
+        to say about its columns, and the alternative to reading the file is
+        rejecting every row of a perfectly readable one. So the same two steps
+        the preview shows are applied here -- the layout, then the mapping -- and
+        both are reported in the result's warnings with the evidence for them,
+        because the failure mode of a misread file is a plausible chain rather
+        than an error.
+
+        When a two-sided chain is detected, the expiry hint carried by the
+        filename is applied, because such a file names its expiry in no column.
+        It is a hint and is reported as one:
+        :attr:`IngestionWarningCode.EXPIRY_FROM_FILENAME` names the date and
+        where it came from, so a wrong one is visible rather than silently
+        shifting every contract along the term structure.
+        """
+        if layout is not None:
+            return ReadingPlan(layout=layout, mapping=mapping, detection=detection)
+        if mapping.to_dict():
+            return ReadingPlan(layout=None, mapping=mapping, mapping_inferred=mapping_inferred)
+
+        found = detect_layout(data, filename=filename)
+        if found.layout is ChainLayout.TWO_SIDED and found.two_sided is not None:
+            resolved = replace(found.two_sided, expiry=found.suggested_expiry)
+            return ReadingPlan(layout=resolved, mapping=mapping, detection=found)
+
+        # A long-form file whose columns were never named. Inference is the same
+        # step the preview performs and shows; it is applied here so that a file
+        # uploaded with nothing said about it is still read, and reported so the
+        # user can see which column was taken for which field.
+        inferred = infer_mapping(list(found.headers), OPTION_CHAIN_FIELDS)
+        if inferred.missing_required(OPTION_CHAIN_FIELDS):
+            return ReadingPlan(layout=None, mapping=mapping, detection=found)
+        return ReadingPlan(layout=None, mapping=inferred, detection=found, mapping_inferred=True)
+
     def _read(
         self,
         data: bytes,
@@ -198,7 +301,7 @@ class OptionChainIngestionPipeline:
         layout: TwoSidedLayout | None,
         limit: int | None = None,
     ) -> tuple[ParseResult, tuple[str, ...]]:
-        """Turn a file into parsed rows, resolving its layout first.
+        """Turn a file into parsed rows, using an already-resolved layout.
 
         A two-sided chain is split into one record per quote *by column index*
         before any name-based mapping runs, because the same header name
@@ -240,6 +343,7 @@ class OptionChainIngestionPipeline:
         mapping: ColumnMapping,
         limit: int,
         layout: TwoSidedLayout | None = None,
+        filename: str | None = None,
     ) -> tuple[ParseResult, tuple[str, ...]]:
         """Parse a sample without persisting anything.
 
@@ -247,8 +351,9 @@ class OptionChainIngestionPipeline:
         interpreted, because a misread column produces a plausible, wrong chain
         and no error at all.
         """
-        result, _ = self._read(data, mapping, layout, limit=limit)
-        applied = layout.identity_mapping() if layout is not None else mapping
+        plan = self._resolve_reading(data, mapping, layout, filename)
+        result, _ = self._read(data, plan.mapping, plan.layout, limit=limit)
+        applied = plan.layout.identity_mapping() if plan.layout is not None else plan.mapping
         return result, applied.missing_required(OPTION_CHAIN_FIELDS)
 
     # --------------------------------------------------------------- ingest
@@ -258,10 +363,19 @@ class OptionChainIngestionPipeline:
         warnings: list[AnalyticalWarning] = []
         self._apply_carry_assumption(request)
 
-        parse_result, unmapped = self._read(data, request.column_mapping, request.layout)
+        plan = self._resolve_reading(
+            data,
+            request.column_mapping,
+            request.layout,
+            request.filename,
+            request.layout_detection,
+            request.mapping_inferred,
+        )
+        layout, detection = plan.layout, plan.detection
+        parse_result, unmapped = self._read(data, plan.mapping, layout)
         rows_input = parse_result.row_count + len(parse_result.errors)
 
-        if request.layout is not None:
+        if layout is not None:
             warnings.append(
                 AnalyticalWarning.info(
                     IngestionWarningCode.TWO_SIDED_LAYOUT,
@@ -269,11 +383,49 @@ class OptionChainIngestionPipeline:
                     f"call quote and one put quote, so {rows_input} quote row(s) came from "
                     f"{rows_input // 2} source row(s). Row numbers below are source rows.",
                     layout=str(ChainLayout.TWO_SIDED),
-                    header_row=request.layout.header_row,
-                    strike_column=request.layout.strike_column,
-                    expiry=(request.layout.expiry.isoformat() if request.layout.expiry else None),
+                    header_row=layout.header_row,
+                    strike_column=layout.strike_column,
+                    expiry=(layout.expiry.isoformat() if layout.expiry else None),
                 )
             )
+        if plan.mapping_inferred:
+            warnings.append(
+                AnalyticalWarning.warn(
+                    IngestionWarningCode.MAPPING_INFERRED,
+                    "No column mapping was supplied, so each field was matched to a "
+                    "column by its header name. Check the mapping recorded in this "
+                    "result's provenance: a column taken for the wrong field produces "
+                    "a plausible chain and no error.",
+                    column_mapping=plan.mapping.to_dict(),
+                )
+            )
+        if plan.auto_detected:
+            warnings.append(
+                AnalyticalWarning.warn(
+                    IngestionWarningCode.LAYOUT_AUTO_DETECTED,
+                    "No layout was supplied, and the column mapping could not read the "
+                    "file, so its layout was detected from the header. Check the evidence "
+                    "below against the file: a misread layout produces a plausible chain "
+                    "and no error. " + " ".join(detection.evidence),
+                    evidence=list(detection.evidence),
+                    header_row=layout.header_row,
+                    strike_column=layout.strike_column,
+                    call_columns=dict(layout.call_columns),
+                    put_columns=dict(layout.put_columns),
+                )
+            )
+            if layout.expiry is not None and detection.suggestion_source is not None:
+                warnings.append(
+                    AnalyticalWarning.warn(
+                        IngestionWarningCode.EXPIRY_FROM_FILENAME,
+                        f"The file names no expiry column, so every contract was dated "
+                        f"{layout.expiry.isoformat()} from the {detection.suggestion_source}. "
+                        f"This was not read from the data. If it is wrong, every contract "
+                        f"sits at the wrong point of the term structure.",
+                        expiry=layout.expiry.isoformat(),
+                        source=detection.suggestion_source,
+                    )
+                )
 
         if parse_result.truncated:
             warnings.append(
@@ -332,7 +484,7 @@ class OptionChainIngestionPipeline:
             warnings, request, persistable, rows_kept, rows_input, rejected, flag_counts
         )
 
-        provenance = self._build_provenance(request, parse_result)
+        provenance = self._build_provenance(request, parse_result, plan)
         snapshot = await self._repository.create_chain_snapshot(
             user_id=request.user_id,
             underlying_id=underlying.id,
@@ -727,7 +879,10 @@ class OptionChainIngestionPipeline:
             )
 
     def _build_provenance(
-        self, request: OptionChainIngestionRequest, parse_result: ParseResult
+        self,
+        request: OptionChainIngestionRequest,
+        parse_result: ParseResult,
+        plan: ReadingPlan | None = None,
     ) -> Provenance:
         return Provenance.now(
             code_commit=self._code_commit,
@@ -741,7 +896,16 @@ class OptionChainIngestionPipeline:
                 "quality": QUALITY_MODEL_VERSION,
             },
             parameters={
-                "column_mapping": request.column_mapping.to_dict(),
+                # The reading that actually happened. A detected layout or an
+                # inferred mapping supersedes what the request asked for, so
+                # recording the request here would describe a file that was
+                # never read that way.
+                "column_mapping": _applied_mapping(request, plan).to_dict(),
+                "layout": (
+                    plan.layout.to_dict()
+                    if plan is not None and plan.layout is not None
+                    else str(ChainLayout.LONG)
+                ),
                 "headers": parse_result.headers,
                 "exclusion_severity_threshold": str(request.options.exclusion_severity_threshold),
                 "create_missing_instruments": request.options.create_missing_instruments,

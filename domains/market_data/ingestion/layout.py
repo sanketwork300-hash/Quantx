@@ -201,6 +201,28 @@ class LayoutDetection:
             "suggestion_source": self.suggestion_source,
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict) -> LayoutDetection:
+        """Rebuild a detection that was recorded when the job was submitted.
+
+        The commit path detects the layout once, at submission, and stores it
+        so the worker reads the file exactly the way the caller was told it
+        would be read -- rather than detecting a second time and possibly
+        differently.
+        """
+        expiry = payload.get("suggested_expiry")
+        two_sided = payload.get("two_sided")
+        return cls(
+            layout=ChainLayout(payload["layout"]),
+            headers=tuple(payload.get("headers", ())),
+            two_sided=TwoSidedLayout.from_dict(two_sided) if two_sided else None,
+            evidence=tuple(payload.get("evidence", ())),
+            unmapped_columns=tuple(payload.get("unmapped_columns", ())),
+            suggested_expiry=date.fromisoformat(expiry) if expiry else None,
+            suggested_symbol=payload.get("suggested_symbol"),
+            suggestion_source=payload.get("suggestion_source"),
+        )
+
 
 def read_rows(data: bytes, limit: int | None = None) -> list[list[str]]:
     """Physical rows of the file, as raw cells.

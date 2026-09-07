@@ -136,6 +136,62 @@ class TestUploadAndPreview:
         assert response.json()["code"] == "COLUMN_MAPPING_INCOMPLETE"
 
 
+class TestIngestingWithNothingSaidAboutTheFile:
+    """A long-form file uploaded with an empty request body.
+
+    The commit path applies the same header inference the preview shows, so a
+    user who uploads a file and says nothing gets their chain rather than a
+    rejected row per quote. It is reported, because a column taken for the wrong
+    field produces a plausible chain and no error.
+    """
+
+    @pytest.fixture
+    async def ingested_blind(self, client, auth_header, clean_chain_csv):
+        record = await upload(client, auth_header, clean_chain_csv)
+        accepted = await ingest(
+            client,
+            auth_header,
+            record["id"],
+            column_mapping={},
+        )
+        job = await wait_for_job(client, auth_header, accepted["job_id"])
+        assert job["status"] == "COMPLETED", job
+        result = await client.get(
+            f"/jobs/{job['job_id']}/result", headers={"Authorization": auth_header}
+        )
+        return result.json()["result"]
+
+    async def test_the_chain_loads(self, ingested_blind):
+        counts = ingested_blind["results"]["counts"]
+        assert counts["kept"] > 0
+        assert counts["input"] == counts["kept"] + counts["excluded"] + counts["rejected"]
+
+    async def test_the_inference_is_reported_rather_than_done_quietly(self, ingested_blind):
+        reported = [
+            w for w in ingested_blind["warnings"] if w["code"] == "INGESTION_MAPPING_INFERRED"
+        ]
+        assert reported, [w["code"] for w in ingested_blind["warnings"]]
+        assert reported[0]["context"]["column_mapping"]["option_type"] == "CE_PE"
+
+    async def test_the_provenance_records_the_mapping_actually_used(self, ingested_blind):
+        mapping = ingested_blind["provenance"]["parameters"]["column_mapping"]
+        assert mapping["strike"] == "STRIKE_PRICE"
+        assert mapping["expiry"] == "EXPIRY_DT"
+
+    async def test_a_file_whose_headers_mean_nothing_is_still_refused(self, client, auth_header):
+        record = await upload(client, auth_header, b"a,b,c\n1,2,3\n")
+        response = await client.post(
+            f"/uploads/{record['id']}/ingest",
+            headers={"Authorization": auth_header},
+            json={
+                "underlying": {"symbol": "NIFTY", "exchange": "SYNTH"},
+                "as_of_timestamp": AS_OF,
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["code"] == "COLUMN_MAPPING_INCOMPLETE"
+
+
 class TestCleanChainIngestion:
     async def test_job_completes_and_returns_a_summary(self, ingested_clean):
         assert ingested_clean["status"] in {"OK", "PARTIAL"}

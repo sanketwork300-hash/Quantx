@@ -224,6 +224,15 @@ class MarketDataService:
     async def read_upload(self, upload: UploadORM) -> bytes:
         return await self._store.get(upload.stored_key)
 
+    async def detect_upload_layout(self, upload: UploadORM) -> LayoutDetection:
+        """Read how the file is arranged, without persisting anything.
+
+        Used on the commit path so a caller who never previewed still gets the
+        file read correctly rather than rejected row by row. Only the first few
+        lines are examined.
+        """
+        return detect_layout(await self.read_upload(upload), filename=upload.original_filename)
+
     async def preview_upload(
         self,
         upload: UploadORM,

@@ -26,6 +26,10 @@ Legend: `[x]` shipped · `[ ]` planned
 - [x] Two-sided chain layout: detect an exchange export (calls left of the
       strike, puts right of it, header names repeated per side), resolve it by
       column index before any name-based mapping, and confirm it in the preview
+- [x] Auto-detection on the commit path: a file uploaded with no mapping and no
+      layout is read the way the preview would read it -- layout first, then
+      column mapping -- with what was worked out reported in the result and
+      recorded in provenance
 - [x] Jobs: model, service, task, status/progress/result API
 - [x] Test infrastructure: unit, integration, quant-validation, regression harness
 
@@ -40,6 +44,10 @@ Legend: `[x]` shipped · `[ ]` planned
 | An option chain CSV can be uploaded, previewed, ingested and retrieved | `tests/integration/test_option_chain_ingestion.py` |
 | An exchange two-sided chain export ingests, and **calls keep the call prices** | `tests/integration/test_two_sided_chain.py`, `tests/unit/test_chain_layout.py` |
 | A long-form file is still read as long-form | `test_a_long_form_file_is_left_alone` |
+| A chain export ingests with an empty request body, and still keeps the call prices | `TestTheFileIsReadWithoutBeingDescribed` |
+| A long-form file ingests with an empty body, and the inference is reported | `TestIngestingWithNothingSaidAboutTheFile` |
+| Detection never overrides a caller who supplied a mapping, even a partial one | `TestReadingAFileTheCallerDidNotDescribe` |
+| A file whose expiry is in neither a column nor its filename is refused, not dated | `test_a_file_whose_expiry_is_nowhere_is_refused_not_guessed` |
 | **Every excluded quote has a non-null reason** | asserted over the bad-quote fixture |
 | A job runs asynchronously and reports terminal status | `tests/integration/test_jobs.py` |
 | Synthetic provider produces an arbitrage-clean chain | `tests/quant_validation/test_synthetic_provider.py` |

@@ -121,19 +121,40 @@ price on each side of it, and no option-type column anywhere; the reading and
 the evidence for it are returned to the user in the preview, on the same
 footing as an inferred column mapping, and confirmed before any commit.
 
-Three conventions follow:
+The same two steps run on the commit path, but only as a fallback: when a
+request names no layout and carries no mapping at all, the file is read the way
+it is actually arranged -- layout first, then column mapping -- rather than
+rejected once per row. The realistic user downloads a chain from an exchange and
+uploads it with nothing to say about its columns, and rejecting a readable file
+because they did not describe it is the feature not working. A caller who does
+state a mapping is never second-guessed, not even a partial one: they know
+something about their file that a header scan does not, and the useful answer to
+an incomplete instruction is which field is missing.
 
-* The expiry is supplied by the user, not read from the file. Chain exports
-  name one expiry in their filename and repeat it in no column. The filename's
-  date is offered as a suggestion tagged with its source; ingestion requires
-  the expiry explicitly, because a wrong expiry moves every contract along the
-  term structure without changing anything visible about the chain.
+What was worked out is reported with the result
+(`INGESTION_LAYOUT_AUTO_DETECTED`, carrying the same evidence the preview shows,
+and `INGESTION_MAPPING_INFERRED`, carrying the matched mapping) and recorded in
+`provenance.parameters`, so the reading that produced a snapshot is always
+recoverable from the snapshot.
+
+Four conventions follow:
+
+* The expiry is never invented. Chain exports name one expiry in their filename
+  and repeat it in no column, so there is nothing in the data to read it from.
+  The filename's date is applied and reported as such
+  (`INGESTION_EXPIRY_FROM_FILENAME`, naming the date and its source), because
+  the alternative for a readable file is rejecting every row of it. A file whose
+  name carries no date is refused rather than dated with something plausible: a
+  wrong expiry moves every contract along the term structure without changing
+  anything visible about the chain.
 * Every source row emits both sides. A side that was not quoted is judged by
   the ordinary validator (`NO_PRICE_FIELDS`) rather than dropped by the
   splitter, so there is one exclusion rule and `rows_input == kept + excluded +
   rejected` continues to hold over quote rows.
 * Both quotes from a source line report that line's number, so a reported row
   is one the user can open in their own spreadsheet.
+* A detected layout is pinned when the job is submitted, so the worker reads the
+  file the way the caller was told it would be read.
 
 ## 3. Market data quality scoring — Phase 0 (implemented)
 

@@ -16,7 +16,7 @@ from domains.instruments.enums import (
 from domains.jobs.handlers import register
 from domains.jobs.models import Job, JobType
 from domains.market_data.ingestion.column_mapping import ColumnMapping
-from domains.market_data.ingestion.layout import TwoSidedLayout
+from domains.market_data.ingestion.layout import LayoutDetection, TwoSidedLayout
 from domains.market_data.ingestion.pipeline import (
     ContractSpec,
     IngestionOptions,
@@ -58,6 +58,12 @@ async def ingest_option_chain(session: AsyncSession, job: Job) -> dict:
             if payload.get("layout") is not None
             else None
         ),
+        mapping_inferred=payload.get("column_mapping_inferred", False),
+        layout_detection=(
+            LayoutDetection.from_dict(payload["layout_detection"])
+            if payload.get("layout_detection") is not None
+            else None
+        ),
         contract=ContractSpec(
             multiplier=(
                 Decimal(contract["multiplier"]) if contract.get("multiplier") is not None else None
@@ -86,6 +92,7 @@ async def ingest_option_chain(session: AsyncSession, job: Job) -> dict:
         ),
         risk_free_rate=payload.get("risk_free_rate"),
         dividend_yield=payload.get("dividend_yield"),
+        filename=upload.original_filename,
         upload_id=upload.id,
         dataset_digest=upload.sha256,
         provider="csv",

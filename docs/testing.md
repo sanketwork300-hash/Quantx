@@ -279,6 +279,20 @@ The companion assertion is that the *long-form* path is unchanged
 (`test_a_long_form_file_is_left_alone`), because a layout detector that starts
 claiming ordinary files is the way this fix would itself become the bug.
 
+Detection also runs on the commit path, which widens that risk, so
+`TestReadingAFileTheCallerDidNotDescribe` pins the boundary directly: a caller
+who supplies a mapping gets no detection at all — including a *partial* one
+(`test_a_partial_mapping_is_an_instruction_too`), which is answered with the
+field it is missing rather than a different reading — a named layout is used
+verbatim, and a long-form file is not turned into a two-sided one.
+
+`TestTheFileIsReadWithoutBeingDescribed` then commits the NSE file with an empty
+request body and asserts both that it loads and that the calls still carry the
+call prices: the same assertion as the confirmed path, because the shortcut must
+not be the unsafe one. `TestIngestingWithNothingSaidAboutTheFile` does the same
+for a long-form file and asserts that the header-name inference is reported
+rather than done quietly.
+
 ## 5. Regression / golden files
 
 Committed fixtures with committed expected outputs:
