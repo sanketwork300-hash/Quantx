@@ -159,6 +159,72 @@ FIELDS_BY_KIND: dict[str, tuple[FieldSpec, ...]] = {"OPTION_CHAIN": OPTION_CHAIN
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 
+#: Columns a historical OHLCV file carries. The same ``FieldSpec`` machinery the
+#: option-chain reader uses, so header inference, coercion and the "a partial
+#: mapping is an instruction" rule all behave identically for bars — one reader,
+#: one set of conventions, one place a alias list is maintained.
+BAR_FIELDS: tuple[FieldSpec, ...] = (
+    FieldSpec(
+        "exchange_timestamp",
+        FieldType.DATETIME,
+        True,
+        ("timestamp", "datetime", "date", "time", "bartime", "start", "starttime", "dt", "ts"),
+        "The bar's opening instant. Must carry a UTC offset.",
+    ),
+    FieldSpec(
+        "open",
+        FieldType.DECIMAL,
+        True,
+        ("open", "o", "openprice", "opening"),
+        "Opening price.",
+    ),
+    FieldSpec("high", FieldType.DECIMAL, True, ("high", "h", "highprice", "max"), "Session high."),
+    FieldSpec("low", FieldType.DECIMAL, True, ("low", "l", "lowprice", "min"), "Session low."),
+    FieldSpec(
+        "close",
+        FieldType.DECIMAL,
+        True,
+        ("close", "c", "closeprice", "last", "closing", "adjclose", "adjustedclose"),
+        "Closing price.",
+    ),
+    FieldSpec(
+        "volume",
+        FieldType.DECIMAL,
+        True,
+        ("volume", "v", "vol", "quantity", "qty", "tradedquantity"),
+        "Traded volume over the bar.",
+    ),
+    FieldSpec(
+        "symbol",
+        FieldType.STRING,
+        False,
+        ("symbol", "ticker", "tradingsymbol", "instrument", "name", "scrip"),
+        "Instrument symbol, resolved against the instrument master.",
+    ),
+    FieldSpec(
+        "vwap",
+        FieldType.DECIMAL,
+        False,
+        ("vwap", "averageprice", "avgprice", "typicalprice"),
+        "Volume-weighted average price, only where the venue publishes it.",
+    ),
+    FieldSpec(
+        "trade_count",
+        FieldType.INTEGER,
+        False,
+        ("trades", "tradecount", "numtrades", "ntrades", "count"),
+        "Number of trades in the bar.",
+    ),
+    FieldSpec(
+        "end_timestamp",
+        FieldType.DATETIME,
+        False,
+        ("endtimestamp", "end", "endtime", "closetime"),
+        "The bar's closing instant, where the source states it.",
+    ),
+)
+
+
 def normalize_header(header: str) -> str:
     return _NON_ALNUM.sub("", header.strip().lower())
 

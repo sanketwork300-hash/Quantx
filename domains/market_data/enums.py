@@ -118,6 +118,8 @@ class UploadKind(StrEnum):
     POSITIONS = "POSITIONS"
     TRADES = "TRADES"
     QUOTES = "QUOTES"
+    #: Historical OHLCV, for the warehouse.
+    BARS = "BARS"
     #: Periodic depth snapshots: one row per instant, levels across the row.
     BOOK_SNAPSHOTS = "BOOK_SNAPSHOTS"
     #: Event-level add/cancel/modify/execute messages: one row per message.

@@ -22,10 +22,14 @@ from api.routes import (
     live,
     market,
     microstructure,
+    optimisation,
     orders,
     portfolio,
+    research,
     risk,
+    trading,
     uploads,
+    warehouse,
 )
 from infrastructure.database.session import dispose_engine
 from infrastructure.observability.logging import (
@@ -125,6 +129,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         execution.router,
         microstructure.router,
         orders.router,
+        warehouse.router,
+        research.router,
+        optimisation.router,
+        trading.router,
         jobs.router,
     ):
         app.include_router(router, prefix=API_PREFIX)

@@ -564,6 +564,303 @@ six hundred, and presenting them identically is the dishonest part. A sample
 with no variation returns no z-score rather than a large one from rounding
 noise.
 
+## 8a-bis. Delta-quoted skew — real-time Phase 2 (implemented)
+
+Section 8a records the surface's shape as `dsigma/dk` at the money. That is the
+right coordinate for arbitrage and the wrong one for comparison: nobody quotes a
+smile as a derivative. The market quotes it as a **risk reversal** and a
+**butterfly** at a delta level, and both are recorded alongside.
+
+```
+K_c  such that  Delta_call(K_c)  = +D          e.g. D = 0.25
+K_p  such that  Delta_put (K_p)  = -D
+RR(D) = sigma(K_c) - sigma(K_p)
+BF(D) = (sigma(K_c) + sigma(K_p)) / 2 - sigma(k = 0)
+```
+
+Recorded at **D = 0.25 and D = 0.10**. The 25-delta pair is the standard skew
+quote; the 10-delta pair says how the far wing behaves, which is where a smile
+that was fitted rather than observed is most likely to be wrong.
+
+### Three things stated rather than assumed
+
+**The delta convention.** Delta is `N(d1)` for a call and `N(d1) - 1` for a put,
+undiscounted — **forward delta**, Black-76, the convention the rest of the
+platform's forward machinery uses. Spot delta and premium-adjusted delta give
+different strikes for the same nominal delta, so the convention is carried on
+every stored and returned result rather than documented once. A number whose
+convention is unstated cannot be reconciled with a broker's runs.
+
+**The strike is solved, not approximated.** The volatility used in the delta is
+itself a function of the strike being solved for, so `K(D)` has no closed form
+on a smile. It is a bracketed Brent solve on `k`, and the residual
+`Delta(K_solved) - D` is returned so a caller need not take convergence on
+trust.
+
+**A strike outside the fitted range is labelled.** A 10-delta strike is often
+beyond anything that was quoted. The value is still computed — extrapolating a
+fitted SVI slice is a defined operation — but its status is `EXTRAPOLATED`, and
+a status of `NOT_BRACKETED` means the delta occurs nowhere in the searched range
+and is reported as unmeasurable rather than resolved by widening the search.
+Widening silently would put a strike far outside the traded market into a skew
+number; the risk reversal is `null` in that case, which is a different statement
+from a skew of zero.
+
+The last point has a subtlety worth recording. For a smile whose wings obey the
+no-arbitrage slope bound, delta is monotone in `k` and the absence of a sign
+change across the search range genuinely means the delta does not occur. For a
+smile that violates that bound, delta can turn back on itself and a delta level
+can occur at more than one strike. Both are reported the same way, and neither
+is resolved by hunting for an interior root, because that would pick one of
+several strikes with the same delta without saying which.
+
+Nothing here is stored. Delta skew is a pure function of the five SVI numbers
+per slice, so it is recomputed on read from the persisted surface; a stored copy
+could only drift from the surface it describes.
+
+## 8a-ter. Open interest and volume — real-time Phase 2 (implemented)
+
+Sums and ratios over an option-chain snapshot: open interest and volume by
+strike and expiry, the put-call ratio on each, turnover against open positions,
+and the change between two snapshots.
+
+**These are measurements, and the platform does not interpret them.** A put-call
+ratio is widely read as a sentiment indicator, usually contrarian, on evidence
+that is thin and regime-dependent. Section 1's language policy applies here as
+everywhere: the ratio and the counts behind it are reported, and no reading of
+them appears in any field, label or message.
+
+Three measurement rules:
+
+| Rule | Why |
+| --- | --- |
+| A missing figure is not a zero | Summing absences as zeros understates a total and moves the ratio built from it, and nothing about the result would say so. `contracts_with_open_interest` and `coverage` say how much of the chain carried a figure at all. |
+| A zero or absent denominator gives `null`, not infinity | "There is no open interest on the calls" is a fact about the chain. An infinite ratio plots as a spike. |
+| The unit is the venue's | Some exchanges publish open interest in contracts and some in units of the underlying, and the platform is not told which. Ratios cancel it. Absolute totals carry `open_interest_unit = PROVIDER_REPORTED_UNNORMALISED` rather than being scaled by a lot size nobody verified. |
+
+Change is computed only between two stored snapshots, only for contracts present
+in both, matched on instrument id — which is derived from the canonical key, so
+two snapshots agree about which contract is which by construction rather than by
+comparing decimals. Every change carries `window_seconds`: without it a figure
+measured over eleven minutes reads exactly like one measured over a session.
+Contracts present in only one snapshot are counted, not dropped, because a
+chain's listed strikes change as the underlying moves and a total that quietly
+lost them would not add up.
+
+**Deliberately not implemented: "max pain".** It is a well-defined function of
+open interest, and it is almost always presented as a prediction of where the
+underlying will settle. The platform has no basis for that claim and will not
+imply one by shipping the quantity under its usual name.
+
+## 3a. Historical data validation and dataset quality — real-time Phase 3 (implemented)
+
+### Outliers on a return series
+
+A **modified z-score** on log returns, about the median and scaled by the median
+absolute deviation (Iglewicz & Hoaglin, 1993):
+
+```
+z_i = 0.6745 * (r_i - median(r)) / MAD(r)
+```
+
+Robust rather than mean-and-standard-deviation because the thing being looked for
+is exactly what would inflate a standard deviation: one bad tick raises sigma
+enough to hide itself.
+
+The flag threshold is **|z| > 10**, deliberately far out. Financial returns have
+fat tails; a threshold catching every three-sigma day would flag a third of every
+crisis and train everyone to ignore the flag. Ten robust deviations is a move
+that is either real and enormous or a data error, and either way is worth a look.
+
+A series that barely moves has `MAD = 0` exactly, and a lone spike in it would be
+invisible to a MAD-based score — which is precisely the bad tick worth catching.
+The scale then falls back to the mean absolute deviation about the median, with
+the same authors' constant 0.7979. A genuinely constant sample scores zero, and
+there a spike does not exist to be found.
+
+**Outliers are flagged and kept.** The row reaches its partition with the flag as
+a column, and `exclude_flagged` on a query defaults to false. An outlier is often
+the most important observation in a sample, and the judgement belongs to whoever
+is modelling.
+
+### Split-like jumps
+
+A price ratio `r = p_t / p_{t-1}` is compared, **both ways round**, against a
+short list of ratios a split or bonus issue produces — 2, 2.5, 3, 4, 5, 10, 3/2,
+5/4, 20 — within 3%. Both ways round so a 5:1 split (price falls to a fifth) and a
+1:5 reverse split are both caught; 3% so the test survives a day's ordinary move
+and a dividend on top of the split without calling a 1.9x move a 2:1.
+
+The check runs only on a jump already flagged as an outlier, and only on a series
+**not declared `ADJUSTED_BY_SOURCE`**.
+
+**This detects; it never corrects.** The platform holds no corporate-action feed,
+so it cannot adjust a series and will not pretend to. What it prevents is a 1:5
+split being read as an -80% return by a backtest that had no way of knowing —
+the dataset is quarantined and the finding names the ratio, the date and the
+declared treatment.
+
+### Gaps
+
+No trading calendar is used, because exchange calendars come from QuantLib and
+QuantLib is a test oracle here rather than a runtime dependency (§ references).
+So the platform does not claim which absent dates are holidays.
+
+What it reports is whether an absence is **shared**: a date with no observation
+for any instrument in the dataset (`GAP_ALL_INSTRUMENTS`, INFO — what a closure
+looks like) or one carrying data for other instruments but not this one
+(`GAP_SINGLE_INSTRUMENT`, WARNING — what missing data looks like). The
+distinction is derived from the data itself and is the one a reader needs.
+
+### Dataset quality
+
+Five dimensions in `[0, 1]`, aggregated as a **weighted geometric mean** — the
+same aggregation and the same reason as §3: one catastrophic dimension must drive
+the overall to zero rather than be averaged away.
+
+| Dimension | Definition |
+| --- | --- |
+| completeness | `rows_written / rows_in`. Not "fraction of the data that should exist", which needs a calendar. |
+| consistency | fraction of rows with no structural defect. |
+| outlier | fraction of rows with no outlier or split-like flag. |
+| source | provenance completeness: source named, treatment declared, digest present — one third each. **Not** a ranking of vendors, which the platform has no basis for. |
+| freshness | `0.5 ** (age_days / half_life)`, and **`None` for a non-continuous dataset**. A 2015 tape is not stale, it is history. |
+
+A dimension that cannot be measured is `None`, never zero.
+
+## 3b. Backtest metrics and attribution — real-time Phase 4 (implemented)
+
+### Annualisation
+
+The factor is the **median gap between bars**, converted to bars per year.
+Median rather than mean because a market closure or a data gap is a long
+interval that would drag a mean and change every annualised number in the report.
+Assuming 252 on a weekly series would be wrong by a factor of seven, and nothing
+in the output would say so.
+
+```
+periods_per_year = seconds_per_year / median(gap between consecutive bars)
+volatility_ann   = stdev(returns) * sqrt(periods_per_year)
+sharpe           = mean(r - rf/f) / stdev(r - rf/f) * sqrt(f)
+sortino          = mean(r - rf/f) / sqrt(sum(min(r - rf/f, 0)^2) / n) * sqrt(f)
+```
+
+Sortino's denominator is the downside deviation **about the target**, divided by
+the full sample count — which is what makes it a Sortino rather than a one-sided
+Sharpe.
+
+### Metrics that decline to be computed
+
+| Metric | Returns `None` when | Because |
+| --- | --- | --- |
+| `cagr` | the window is under six months | annualising a six-week return describes a year nobody observed, and it is invariably the largest number in the report |
+| `sortino` | nothing fell | there is no downside deviation, and infinity is not a number worth printing |
+| `profit_factor` | nothing lost | same |
+| `annualised_volatility` | the sample has no dispersion | a zero denominator is not a small one |
+| every ratio | fewer than 30 returns | reported *and* marked unreliable — the observation count travels with the answer, as it does for surface characteristics |
+
+### The attribution identity
+
+```
+final equity − initial equity = realised P&L + unrealised P&L − costs
+```
+
+Checked on every report, with the residual published. An attribution that does
+not close is a bug rather than an approximation.
+
+**Slippage is not a term in it.** A fill is booked at the price it actually paid,
+slippage included, so the price P&L already contains it; subtracting it again
+double-counts into the residual. It is reported separately because it answers a
+different question — how much of the price P&L was given up against the reference
+price — and because it is an assumption rather than a fee.
+
+Greek attribution is **absent rather than zero**. It needs a repriced surface at
+every step, which a bar-series backtest does not produce, and a zero theta reads
+as "no time decay" rather than "not applicable".
+
+### Trading costs
+
+Not modelled by this platform. Brokerage, exchange transaction charges, SEBI
+turnover fees, STT/CTT, stamp duty and GST are set by brokers, exchanges and
+regulators; they differ by segment and side and they change. Build spec 1.1 puts
+them with contract multipliers: an unknown one is declared, not defaulted.
+
+A schedule is supplied component by component (`TURNOVER`, `PER_UNIT`,
+`PER_ORDER`, `ON_OTHER_COMPONENTS`), with an optional cap, floor and side. A run
+without one is **gross**, labelled on every figure it produces — silently
+assuming free trading is the commonest way a backtest reports returns that do not
+exist.
+
+## 3c. Portfolio optimisation — real-time Phase 5 (implemented)
+
+### The objectives
+
+```
+minimum variance   min  w'Sigma w
+mean-variance      max  mu'w - (lambda/2) w'Sigma w
+maximum Sharpe     max  (mu'w - rf) / sqrt(w'Sigma w)
+risk parity        min  sum_i (RC_i - 1/n)^2,  RC_i = w_i (Sigma w)_i / w'Sigma w
+minimum CVaR       min  zeta + 1/((1-alpha)m) sum_j u_j   s.t. u_j >= -(r_j.w) - zeta
+```
+
+The first four are solved with SLSQP from several starting points, because
+several are not convex over the feasible set and one start is one local answer;
+the number attempted and the number that converged are both reported. Maximum
+Sharpe is solved **directly** rather than through the usual homogeneous
+transformation: that transformation holds only for a budget-and-long-only
+feasible set and quietly gives the wrong answer under a gross-exposure or
+turnover limit.
+
+CVaR is a linear program (Rockafellar & Uryasev, 2000). Gross-exposure and
+turnover limits are carried with auxiliary variables so the program stays linear,
+rather than being dropped because they involve an absolute value.
+
+### Expected returns
+
+Never estimated unless asked for. Mean-variance is an error maximiser: it puts
+the most weight exactly where the estimation error is largest, and historical
+sample means are a poor forecast at any sample length a practitioner has. A
+return-seeking objective with no `SUPPLIED`, `EQUILIBRIUM` or `BLACK_LITTERMAN`
+vector is refused, and `HISTORICAL_MEAN` carries a warning wherever it appears.
+
+### Black-Litterman
+
+```
+Pi        = delta * Sigma * w_prior
+posterior = [(tau Sigma)^-1 + P' Omega^-1 P]^-1 [(tau Sigma)^-1 Pi + P' Omega^-1 Q]
+```
+
+`w_prior`, `delta` and `tau` are all supplied. The platform holds no market caps,
+so the prior portfolio cannot be market-cap weights unless the caller says they
+are; `tau` has no consensus value and is quoted anywhere from 0.01 to 1.
+
+`Omega` is diagonal from the views' own stated uncertainties. A full view
+covariance would ask the user how their views correlate, which nobody can answer,
+and filling it in would be the platform inventing an opinion.
+
+The posterior covariance returned is `Sigma + Sigma_posterior_mean`. Estimation
+uncertainty in the mean adds to the covariance of returns, and conflating them
+understates portfolio risk.
+
+### Covariance shrinkage
+
+Ledoit & Wolf (2003), towards a constant-correlation target, with the intensity
+derived analytically. Offered by name and never as a default: the platform's
+standing rule is that a regularisation which makes a matrix invertible is a
+modelling decision the user should see. The intensity is reported, and above 0.5
+is warned about — it means the sample said very little.
+
+### Diagnostics
+
+```
+RC_i              = w_i (Sigma w)_i / (w' Sigma w)      sums to 1
+effective assets  = 1 / sum_i (|w_i| / sum|w|)^2
+```
+
+Risk contributions and effective assets are reported beside the weights because
+the weights routinely mislead about both: a twenty-name book with an effective
+count of two is holding one bet.
+
 ## 8b. Anomaly detection — Phase 3 (implemented)
 
 ### What is measured
@@ -1488,3 +1785,47 @@ into a single cost figure would bury the gate that Phase 10 exists to enforce.
     single figure combining reference value, estimated slippage and margin
     consumption would be a statement about someone's risk appetite, and the
     platform does not have one; the branches are reported side by side.
+
+
+---
+
+## 3d. Paper fills, and what an execution is evidence of
+
+A fill is the platform asserting that a trade could have happened at a price.
+That assertion needs evidence, and the evidence is the quote. Where the quote
+does not support it, the honest answer is no fill and a reason — not a fill at
+whatever number happened to be available.
+
+This is the same rule that makes `Quote.mid_price` return `None` rather than fall
+back to the last trade, applied at the point of execution, and it has the same
+justification: a substitution nobody sees is how a book becomes fiction. The
+difference is that here the substitution leaves a position behind.
+
+**Price basis.** Every fill records which observed field its price came from —
+`MARKET_ASK`, `MARKET_BID`, `LAST_TRADE`, `BROKER_REPORTED_AVERAGE`. "250.10" does
+not say whether it was an ask somebody published, a print from an hour ago, or a
+broker's mean across four executions, and those are different claims.
+
+**Depth.** A quote that reports no size on the touched side fills in full and is
+flagged `DEPTH_NOT_REPORTED`. The fill is not refused — refusing every order
+against a quote with no depth field would make the tool useless — but a complete
+fill is being asserted against liquidity nobody published, and the flag is what
+stops that reading as an observation.
+
+**Staleness is asymmetric with valuation, deliberately.** A quote too old to fill
+against may still be the right mark for a position. A stale mark is the best
+available observation of something that exists; a stale fill asserts liquidity
+that has not been published since. The tolerances are separate and both are
+declared parameters.
+
+**Slippage needs a stated baseline.** `slippage_against_reference` is `None`
+without a reference price, and `slippage_against_decision` is `None` without a
+decision price the caller supplied. Build spec §25 lists slippage among an
+order's fields; it does not follow that a number can be produced without a
+baseline. Choosing one after the fact — the arrival mid, the first fill — makes
+every order look good against itself.
+
+**Costs are never invented.** Brokerage, STT and GST are exchange and régime
+rules. With no schedule supplied the account uses `NO_COST_MODEL` and every
+figure is labelled gross. That is not a claim that trading is free; it is a
+refusal to guess what it costs.

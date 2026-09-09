@@ -26,6 +26,7 @@ from domains.derivatives.calibration import (
     SurfaceCalibrationRequest,
     SurfaceCalibrationService,
 )
+from domains.derivatives.chain_greeks import chain_greeks as build_chain_greeks
 from domains.derivatives.characteristics import surface_term_structure
 from domains.derivatives.forward import (
     ForwardEstimate,
@@ -399,6 +400,28 @@ class DerivativesService:
         return ForwardEstimator.select(estimates).to_dict()
 
     # ---------------------------------------------------- surface calibration
+    async def chain_greeks(self, analysis_id: uuid.UUID, user_id: uuid.UUID):
+        """Greeks for every solved contract in a stored analysis.
+
+        Rehydrated from the database rather than held over from the run that
+        produced it, for the same reason the calibration is: the answer must be
+        a function of what was persisted, not of what happened to be in memory.
+        """
+        row = await self.repository.get_analysis(analysis_id, user_id)
+        if row is None:
+            return None
+
+        analysis = await self._rehydrate_analysis(row)
+        parameters = (row.provenance or {}).get("parameters") or {}
+        return build_chain_greeks(
+            analysis,
+            underlying_price=float(row.underlying_price) if row.underlying_price else None,
+            risk_free_rate=float(parameters.get("risk_free_rate") or 0.0),
+            dividend_yield=float(parameters.get("dividend_yield") or 0.0),
+            dividend_yield_assumed=bool(parameters.get("dividend_yield_assumed", True)),
+            analysis_id=analysis_id,
+        )
+
     async def calibrate_surface(
         self, user_id: uuid.UUID, analysis_id: uuid.UUID, params: CalibrateSurfaceParams
     ):

@@ -288,6 +288,111 @@ provider's own `.proto` and refuses to start without one, because plausible
 numbers from a format nobody checked is the worst failure a market-data system
 has. See [`docs/live-market-data.md`](docs/live-market-data.md).
 
+### Real-time Phase 2 — live options intelligence
+
+A live option chain reaching the volatility machinery that was already there. It
+adds no second IV solver and no second SVI fit: the capture writes into the same
+`option_chain_snapshots` row a CSV upload produces, and the Phase 1, 2, 3 and 9
+engines run on it unchanged — which is what makes a live surface refittable six
+months later on exactly the terms a historical one is.
+
+Two genuinely new pieces of arithmetic. **Delta-quoted skew** — 25Δ and 10Δ risk
+reversal and butterfly — because `dsigma/dk` is the right coordinate for
+arbitrage and the wrong one for comparison with a broker's runs; the delta
+convention rides on every result, a strike outside the fitted range is labelled
+`EXTRAPOLATED`, and a wing that could not be found gives `null` rather than
+zero. And **open interest**: sums, put-call ratios and change between snapshots,
+reported as measurements with no reading of them attached — a missing figure is
+never a zero, a zero denominator gives `null` rather than infinity, and the
+venue's open-interest unit is labelled rather than normalised. "Max pain" is
+deliberately absent. See [`docs/live-options.md`](docs/live-options.md).
+
+### Real-time Phase 3 — historical warehouse
+
+Partitioned Parquet in the object store, a registry in PostgreSQL, DuckDB over
+the top. The layout is Hive-style — `exchange=NSE/year=2026/month=03/day=02` —
+so a query for one week reads that week's files and no others, and the response
+reports how many partitions actually contributed rows so a broken prune fails a
+test rather than merely being slow.
+
+The validator's rule is the platform's oldest one: **found, reported, never
+repaired.** Rows in equals rows written plus excluded plus rejected; a bad tick
+is flagged and kept, with the flag as a column in the file; a naive timestamp is
+refused rather than read as UTC, because a year of NSE bars read that way is a
+year shifted by five and a half hours. A jump that looks like a 1:5 split is
+detected and the dataset is **quarantined** — the platform holds no
+corporate-action feed, so it will not adjust the series and will not pretend to,
+and an unflagged split reads as an -80% return that a backtest has no way of
+questioning. Gaps are reported as shared across every instrument, or not, because
+that is derivable from the data; naming which absent dates are holidays is not.
+See [`docs/warehouse.md`](docs/warehouse.md).
+
+### Real-time Phase 4 — research and backtesting
+
+Point-in-time features, four benchmark strategies, an event-driven engine, the
+metrics, an attribution that closes, and a record of every run.
+
+Three refusals shape it. **No feature can see the future** — the guarantee is a
+property test, not a comment: computing a feature over a truncated series must
+give the same value at its last bar as over the whole series, asserted for every
+feature shipped. **A decision on bar `t` is filled on bar `t+1`**, and there is no
+"same bar's close" option, because making the most common backtest error a
+setting means somebody will set it. **Trading costs are supplied, never
+invented** — brokerage, STT and GST are set by brokers, exchanges and regulators,
+and a net return computed from fabricated rates would be wrong in a way nobody
+could detect; a run without a schedule is *gross* and says so on every figure.
+
+The attribution has to close: `equity change = realised + unrealised − costs`,
+with the residual published. Slippage is reported but not subtracted, because it
+is already inside the fill prices — that one was wrong here first. And nothing in
+the phase evaluates a strategy against today's market, which is the point at
+which a research tool becomes a recommendation engine. See
+[`docs/research.md`](docs/research.md).
+
+### Real-time Phase 6 — paper trading
+
+An order lifecycle end to end, with the broker behind an interface rather than a
+special case in the middle of the service. `PaperBroker` and the live adapter
+implement the same six methods, which is build spec §23's requirement and the
+only reason Phase 7 is a substitution rather than a rewrite.
+
+The rule that shapes it is that a fill is an *assertion* that a trade could have
+happened at a price, and the evidence for it is the quote. A market order with
+no offer on its side does not fill; it is refused with `NO_TWO_SIDED_MARKET`,
+because filling at the last trade would be `Quote.mid_price` falling back to the
+last trade all over again — this time with a position to show for it. Filling
+against a print is a policy that has to be chosen, and every such fill says so
+for the rest of its life.
+
+The gate refuses and never resizes: an order over a position limit is rejected
+whole, with the limit and the number that breached it, because an order trimmed
+to fit is one nobody sent. It reports the checks it *did not* run, since "there
+was no limit to check against" and "this was checked and was fine" are different
+answers. And the book is the existing backtest accounting, so a strategy's paper
+P&L and its backtest P&L come from one implementation — asserted by replaying the
+stored fills and comparing. See [`docs/trading.md`](docs/trading.md).
+
+### Real-time Phase 7 — live trading
+
+Almost no new code, which is the point: the OMS, gate, kill switch, book and
+audit trail are the same objects as on paper, and `venue` is a field. Writing the
+second broker adapter is what established that "paper uses the same interface as
+live" was true rather than merely intended — no OMS method changed to take it.
+
+Three independent gates gate a live order: the deployment flag (`false` by
+default), the account's arming, and the adapter's own
+`verified_against_documentation`. The third is the one this phase added on its own
+account. The endpoints and status vocabulary in the Upstox adapter were written
+without reading the broker's published contract, and a wrong field name fails
+loudly whereas a wrong *status* mapping does not — it tells the platform an order
+filled when it did not, and the book is wrong with nothing reporting a problem.
+So the adapter is complete, wired and tested against recorded payloads, and it
+refuses to send a live order until somebody who has checked sets the flag. In the
+same spirit, a broker status the map does not contain raises rather than being
+rounded to a neighbour: "complete" and "cancelled" are both terminal, and
+confusing them either loses a position or invents one. See
+[`docs/trading.md`](docs/trading.md).
+
 ## Five ideas the whole design rests on
 
 **1. Observations are never overwritten by estimates.**
@@ -491,6 +596,11 @@ interpreter.
 | [`docs/market-data.md`](docs/market-data.md) | Provider interface, canonical schemas, quality engine |
 | [`docs/credentials.md`](docs/credentials.md) | Broker credentials: why they are not environment variables |
 | [`docs/live-market-data.md`](docs/live-market-data.md) | Live feed: transports, normalisation, instrument master |
+| [`docs/live-options.md`](docs/live-options.md) | Live chain to surface: capture, delta skew, open interest |
+| [`docs/warehouse.md`](docs/warehouse.md) | Historical warehouse: partitions, validation, dataset quality |
+| [`docs/research.md`](docs/research.md) | Features, strategies, backtesting, metrics, attribution |
+| [`docs/portfolio-construction.md`](docs/portfolio-construction.md) | Optimisers, Black-Litterman, CVaR, constraints |
+| [`docs/trading.md`](docs/trading.md) | Paper trading: what a fill is allowed to rest on, what the risk gate refuses, and why the book is the fills |
 | [`docs/instruments.md`](docs/instruments.md) | Canonical identity and resolution |
 | [`docs/api.md`](docs/api.md) | API contract, current and committed |
 | [`docs/sequence-diagrams.md`](docs/sequence-diagrams.md) | The five flows that define the system |

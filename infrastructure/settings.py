@@ -107,6 +107,12 @@ class Settings(BaseSettings):
     #: How long a subscription registered through the API stays live without
     #: being renewed, so interest from a closed browser tab decays on its own.
     live_subscription_ttl_seconds: int = 900
+    #: Whether any order from this deployment may reach a real broker.
+    #:
+    #: Build spec §46 requires this to default to false, and it does. It is one
+    #: of two independent gates: an account must also be armed, so neither a
+    #: stray configuration change nor a stray API call is enough on its own.
+    live_trading_enabled: bool = False
 
     #: Whose broker connection the shared feed uses. Market data is not
     #: per-user — one entitlement serves the deployment — so the account is
@@ -137,6 +143,17 @@ class Settings(BaseSettings):
     #: reported as such rather than worked around.
     upstox_feed_proto_module: str | None = None
     upstox_feed_proto_message: str = "FeedResponse"
+
+    # ------------------------------------------------ historical warehouse
+    #: How many partitions a query may pull into memory before refusing. Only
+    #: applies to the materialised read path — a filesystem-backed store hands
+    #: the files to the reader and prunes without loading them. A query that
+    #: would exceed this fails with the number rather than silently truncating.
+    warehouse_max_query_partitions: int = 500
+    #: Days without an update after which a *continuous* dataset's freshness
+    #: score has halved. Historical archives are not scored for freshness at
+    #: all: a 2015 tape is not stale, it is history.
+    warehouse_freshness_half_life_days: float = 3.0
 
     # ------------------------------------------------- broker credentials
     #: ``"key_id:base64key[,older_id:base64key]"``. The first entry encrypts new

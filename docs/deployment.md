@@ -120,6 +120,21 @@ reconnects, last error, and a named reason when it is not delivering. A
 one condition that otherwise looks exactly like a quiet market. See
 [`live-market-data.md`](live-market-data.md).
 
+## 4b. The warehouse
+
+Historical data is Hive-partitioned Parquet under the `warehouse/` prefix of the
+object store; only the registry is in PostgreSQL. Two consequences for an
+operator:
+
+- **The object store is the data.** A backup that covers PostgreSQL and not the
+  bucket backs up a catalogue of files that no longer exist. `warehouse/` needs
+  the same treatment as `microstructure/`.
+- **The read path depends on the backend.** A filesystem-backed store lets DuckDB
+  prune partitions and push predicates down; an S3-backed one currently fetches
+  and filters in memory, bounded by `QIP_WAREHOUSE_MAX_QUERY_PARTITIONS`. Which
+  path ran is on every query response as `read_path`, so this is visible rather
+  than something to infer from latency.
+
 ## 5. Health, backup, resources
 
 - `/api/v1/health` — liveness, no dependencies touched.
@@ -163,3 +178,9 @@ one condition that otherwise looks exactly like a quiet market. See
 - [ ] Object-store lifecycle policy for `microstructure/`: L2 parquet grows with
       market activity rather than user activity, so it is the one prefix that
       will outgrow its bucket without one
+- [ ] The same for `warehouse/`, and for the same reason. One file per
+      instrument-day is right for a daily series and wrong for a year of ticks;
+      the platform does not compact partitions, so the growth is linear in
+      instrument-days held
+- [ ] `warehouse/` included in the object-store backup. The registry without the
+      files is a catalogue of things that are gone

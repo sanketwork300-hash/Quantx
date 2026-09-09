@@ -36,8 +36,10 @@ from api.schemas.derivatives import (
     ScanAnomaliesRequest,
     SurfaceSummaryOut,
 )
+from api.schemas.options import ChainGreeksOut, SurfaceDeltaSkewOut
 from api.schemas.uploads import JobAcceptedOut
 from domains.derivatives.application import AnalysisError
+from domains.derivatives.delta_skew import surface_delta_skew
 from domains.instruments.enums import OptionType
 from domains.jobs.dispatcher import submit_job
 from domains.jobs.models import JobStatus, JobType
@@ -351,6 +353,30 @@ async def get_analysis(
     )
 
 
+@router.get("/analyses/{analysis_id}/greeks", response_model=ChainGreeksOut)
+async def chain_greeks_route(
+    analysis_id: uuid.UUID,
+    user: CurrentUser,
+    derivatives: DerivativesServiceDep,
+    include_contracts: bool = True,
+) -> ChainGreeksOut:
+    """Delta, gamma, vega, theta and rho for every solved contract in a chain.
+
+    Measured against **each contract's own implied volatility**, not the fitted
+    surface — these describe the market as quoted, at the prices actually shown.
+    A contract whose volatility did not solve is listed with the reason rather
+    than given zeros, because a row of zeros reads as an option carrying no risk.
+
+    Computed on read from the stored analysis. They are a deterministic function
+    of the persisted implied volatilities and the carry assumption, so a stored
+    copy could only drift from the analysis it describes.
+    """
+    loaded = await derivatives.chain_greeks(analysis_id, user.id)
+    if loaded is None:
+        raise NotFound("Analysis")
+    return ChainGreeksOut.model_validate(loaded.to_dict(include_contracts))
+
+
 @router.get("/chains/{snapshot_id}/smile", response_model=Envelope)
 async def get_smile(
     snapshot_id: uuid.UUID,
@@ -491,6 +517,30 @@ async def get_surface(
         warnings=[],
         provenance=ProvenanceOut(**(row.provenance or {})),
     )
+
+
+@router.get("/surfaces/{surface_row_id}/delta-skew", response_model=SurfaceDeltaSkewOut)
+async def surface_delta_skew_route(
+    surface_row_id: uuid.UUID,
+    user: CurrentUser,
+    derivatives: DerivativesServiceDep,
+) -> SurfaceDeltaSkewOut:
+    """Skew and smile in the units a market quotes them: 25- and 10-delta.
+
+    Computed from the stored surface on read rather than stored alongside it. It
+    is a pure function of five SVI numbers per slice, so a recomputation cannot
+    disagree with a stored copy that has drifted — and there is no second table
+    to migrate when a delta level is added.
+
+    ``dsigma/dk`` at the money is still recorded in the surface characteristics.
+    The two are not redundant: one is the coordinate arbitrage lives in, the
+    other is the number a broker's runs are quoted in.
+    """
+    loaded = await derivatives.load_surface(surface_row_id, user.id)
+    if loaded is None:
+        raise NotFound("Surface")
+    _row, surface = loaded
+    return SurfaceDeltaSkewOut.model_validate(surface_delta_skew(surface).to_dict())
 
 
 @router.post("/surfaces/{surface_row_id}/reference", response_model=Envelope)

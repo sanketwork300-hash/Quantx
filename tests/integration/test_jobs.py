@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import uuid
 
-import pytest
-
 from tests.conftest import register_and_login
 
 AS_OF = "2026-09-24T09:20:00Z"
@@ -84,8 +82,14 @@ class TestJobFailure:
     async def test_a_failed_job_records_a_structured_error(
         self, client, auth_header, clean_chain_csv, monkeypatch
     ):
-        """A handler exception must leave a FAILED job with an error payload,
-        not a lost job stuck in RUNNING."""
+        """A handler exception leaves a FAILED job with an error payload.
+
+        And the submission still succeeds. That is the part worth stating: in
+        queue mode the handler runs in a worker long after the request returned
+        its job id, so eager mode must not turn a failing handler into a 500 the
+        submitter sees instead of the id. The job row is the record of what
+        happened either way, and the client needs the id to read it.
+        """
         import domains.jobs.handlers as handlers
 
         async def exploding_handler(_session, _job):
@@ -102,19 +106,21 @@ class TestJobFailure:
             headers={"Authorization": auth_header},
             files={"file": ("c.csv", clean_chain_csv, "text/csv")},
         )
-        with pytest.raises(RuntimeError, match="synthetic handler failure"):
-            await client.post(
-                f"/uploads/{upload.json()['id']}/ingest",
-                headers={"Authorization": auth_header},
-                json={
-                    "underlying": {"symbol": "NIFTY", "exchange": "SYNTH"},
-                    "as_of_timestamp": AS_OF,
-                    "column_mapping": MAPPING,
-                },
-            )
+        submitted = await client.post(
+            f"/uploads/{upload.json()['id']}/ingest",
+            headers={"Authorization": auth_header},
+            json={
+                "underlying": {"symbol": "NIFTY", "exchange": "SYNTH"},
+                "as_of_timestamp": AS_OF,
+                "column_mapping": MAPPING,
+            },
+        )
+        assert submitted.status_code == 202, submitted.text
+        job_id = submitted.json()["job_id"]
 
         listing = await client.get("/jobs", headers={"Authorization": auth_header})
         job = listing.json()["items"][0]
+        assert job["job_id"] == job_id
         assert job["status"] == "FAILED"
         assert job["error"]["type"] == "RuntimeError"
         assert "synthetic handler failure" in job["error"]["message"]

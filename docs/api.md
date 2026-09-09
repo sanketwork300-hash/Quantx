@@ -328,6 +328,128 @@ call reproduces, and to refuse any quote stamped after it (those are reported in
 See [`live-market-data.md`](live-market-data.md) for the transports, the
 normalisation report and the instrument master.
 
+## 6b. Live options intelligence **[P2-realtime]**
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| POST | `/live/options/analyse` | 202; capture the live chain and take it through to a fitted surface |
+| GET | `/derivatives/surfaces/{id}/delta-skew` | 25Δ / 10Δ risk reversal and butterfly off a stored surface |
+| GET | `/derivatives/analyses/{id}/greeks` | delta, gamma, vega, theta, rho for every solved contract |
+| GET | `/market/open-interest/{underlying_id}` | open interest, volume and the ratios between them |
+| GET | `/market/open-interest/{underlying_id}/change` | the move between the two most recent snapshots |
+
+### The pipeline
+
+```http
+POST /api/v1/live/options/analyse
+{"underlying_id": "...", "risk_free_rate": 0.065, "settlement_time_utc": "10:00:00"}
+
+202 {"job_id": "...", "status": "QUEUED"}
+```
+
+Four stages behind one action, against one captured moment. `GET /jobs/{id}/result`
+returns the snapshot, analysis and surface identifiers, so every number traces
+back to the quotes it came from, plus a `stages` map:
+
+```json
+{
+  "capture": {"contracts_considered": 312, "quotes_kept": 288,
+              "quotes_excluded": 11, "contracts_without_quotes": 13,
+              "conserved": true, "timestamp_spread_seconds": 4.0},
+  "stages": {"capture": "OK", "analyse": "OK", "calibrate": "OK", "delta_skew": "OK"}
+}
+```
+
+A stage that cannot run stops the ones depending on it and says which:
+`SKIPPED_NO_USABLE_QUOTES`, `SKIPPED_NO_IMPLIED_VOLS`, `NOT_REQUESTED`. A chain
+with nothing solvable produces no surface rather than an empty one that would
+calibrate to nothing and plot as flat.
+
+`timestamp_spread_seconds` is how much of an instant the snapshot really is —
+every calibration downstream treats its quotes as simultaneous.
+
+### Delta skew
+
+```json
+{
+  "delta_convention": "FORWARD",
+  "levels": [0.25, 0.10],
+  "slices": [{"expiry": "2026-10-29", "atm_volatility": 0.1412,
+              "smiles": [{"delta_level": 0.25, "risk_reversal": -0.0312,
+                          "butterfly": 0.0041,
+                          "call": {"status": "OK", "strike": 24810.5},
+                          "put":  {"status": "EXTRAPOLATED", "strike": 23190.0}}]}],
+  "unmeasured": []
+}
+```
+
+`delta_convention` is on every result: spot and premium-adjusted delta give
+different strikes for the same nominal delta, so a number without it cannot be
+reconciled against a broker's runs. A `risk_reversal` of `null` means a wing's
+strike could not be found — not a skew of zero. `EXTRAPOLATED` means the strike
+lies outside the log-moneyness range the slice was fitted over, which a 10-delta
+strike often does.
+
+### Chain Greeks
+
+```json
+{
+  "volatility_source": "market_implied_per_contract",
+  "risk_free_rate": 0.065, "dividend_yield": 0.0, "dividend_yield_assumed": true,
+  "units": {"vega_per_vol_point": "currency change per +0.01 of volatility",
+            "theta_per_day": "currency change per calendar day",
+            "rho_per_bp": "currency change per +1 basis point of rate"},
+  "counts": {"priced": 288, "unavailable": 11},
+  "expiries": [{"expiry": "2026-09-24", "forward": 24512.4,
+                "contracts": [{"strike": 24500.0, "option_type": "CALL",
+                               "delta": 0.5241, "gamma": 0.00031,
+                               "vega_per_vol_point": 12.44, "theta_per_day": -8.9}],
+                "unavailable": [{"strike": 26500.0, "option_type": "CALL",
+                                 "reason": "NO_IMPLIED_VOL"}]}]
+}
+```
+
+Measured against **each contract's own implied volatility**, not the fitted
+surface — `volatility_source` says so. These describe the market as quoted, at
+the prices actually shown; a fitted-surface Greek is a different and also useful
+quantity, and mixing them would give a table where neighbouring strikes were
+measured against different things.
+
+A contract whose volatility did not solve appears in `unavailable` **with a
+reason**, never with zeros. A zero delta reads as an option carrying no risk,
+and it plots and sums perfectly.
+
+`units` is on every response: an unlabelled vega of 0.42 could be per 1.00 of
+volatility or per volatility point, and those differ by a factor of a hundred.
+`dividend_yield_assumed` is there because a wrong carry moves every delta.
+
+Per unit contract. Position scaling by signed quantity and multiplier belongs to
+the portfolio domain.
+
+### Open interest
+
+```json
+{
+  "open_interest_unit": "PROVIDER_REPORTED_UNNORMALISED",
+  "put_call_ratio_open_interest": 0.94,
+  "expiries": [{"expiry": "2026-09-24", "put_call_ratio_volume": 1.12,
+                "volume_to_open_interest": 0.31,
+                "contracts": 84, "contracts_with_open_interest": 84, "coverage": 1.0}]
+}
+```
+
+Measurements, not readings of them. The platform reports the ratio and the
+counts behind it and says nothing about what either means.
+
+`coverage` matters: a total built from a third of the chain is a different number
+from one built from all of it, and nothing else on the response says so. A ratio
+is `null` where its denominator is zero or absent — an infinite ratio would plot
+as a spike.
+
+`/change` requires two snapshots and returns `OPEN_INTEREST_NEEDS_TWO_SNAPSHOTS`
+(422) with one. Its `window_seconds` is not optional: without it a figure
+measured over eleven minutes reads exactly like one measured over a session.
+
 ## 7. Uploads **[P0]**
 
 | Method | Path | Notes |
@@ -481,6 +603,320 @@ guessed:
 | `contract.expiry_time_utc` | the expiry *instant* stays unknown, so time to expiry is undefined and carry-dependent checks are skipped. |
 | `risk_free_rate` / `dividend_yield` | only the assumption-free option bounds run (`C <= S`, `P <= K`, `price >= 0`). Sub-intrinsic pricing is **not** checked, because without a discount curve a deep in-the-money European put legitimately trades below `K - S`. |
 | `underlying_price` | a chain export usually carries no spot column, so the spot must be supplied or `INGESTION_MISSING_UNDERLYING_PRICE` is raised and moneyness-dependent checks are skipped. |
+
+## 7a. Historical warehouse **[P3-realtime]**
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| POST | `/warehouse/datasets` | 202; read an uploaded historical file into validated partitions |
+| GET | `/warehouse/datasets` | the caller's datasets, with quality |
+| GET | `/warehouse/datasets/{id}` | one dataset, with its provenance and validation summary |
+| GET | `/warehouse/datasets/{id}/partitions` | where the files are and what is in each |
+| GET | `/warehouse/datasets/{id}/findings` | every finding, in full — nothing here was repaired |
+| GET | `/warehouse/query` | DuckDB over the partitions |
+
+### Registering
+
+```http
+POST /api/v1/warehouse/datasets
+{"upload_id": "...", "name": "NIFTY daily", "exchange": "NSE",
+ "corporate_action_treatment": "UNADJUSTED", "instrument_id": "..."}
+
+202 {"job_id": "...", "status": "QUEUED"}
+```
+
+Omit `instrument_id` and the file must carry a symbol column, resolved row by row
+against the instrument master. A symbol matching nothing — or more than one thing
+— is **reported**, never attached to the closest candidate.
+
+`corporate_action_treatment` is `UNADJUSTED`, `ADJUSTED_BY_SOURCE` or `UNKNOWN`.
+It is declared, never inferred: the platform holds no corporate-action feed.
+Leaving it `UNKNOWN` produces a warning, because a series whose treatment nobody
+stated cannot safely be joined to one whose treatment is known.
+
+The job result carries two accountings — the reader's and the warehouse's — and
+between them every row in the file is written, refused, unparseable, or names a
+symbol nobody could resolve:
+
+```json
+{
+  "read": {"rows_in_file": 250, "rows_read": 248, "parse_errors": 1,
+           "unresolved_rows": 1, "conserved": true},
+  "results": {"status": "AVAILABLE", "rows_in": 248, "rows_written": 246,
+              "rows_excluded": 1, "rows_rejected": 1, "rows_flagged": 3,
+              "conserved": true, "partitions": 246,
+              "quality": {"completeness_score": 0.99, "freshness_score": null,
+                          "overall_score": 0.97}}
+}
+```
+
+`freshness_score` is `null` for an archive: a 2015 tape is not stale, it is
+history, and a zero would rank every archive as broken.
+
+### Errors and quarantine
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `DATASET_QUARANTINED` | 422 | validation found an error; the dataset is not served |
+| `WAREHOUSE_QUERY_TOO_LARGE` | 422 | more partitions than the materialised read path allows; the numbers are on the response |
+| `TIMESTAMP_NOT_TIMEZONE_AWARE` | 422 | a naive `start` or `end`; a naive timestamp does not name a moment |
+
+Quarantine refuses to *serve* the data; the partitions and the full findings are
+still retrievable. What it prevents is serving a series with a warning attached
+and hoping the warning is read.
+
+### Querying
+
+```http
+GET /api/v1/warehouse/query?exchange=NSE&instrument_ids=...&start=...&end=...&columns=close
+
+200
+{
+  "columns": ["exchange_timestamp", "close"],
+  "rows": [{"exchange_timestamp": "2026-03-02T00:00:00+00:00", "close": "100.000000000000"}],
+  "row_count": 30,
+  "read_path": "DIRECT",
+  "partitions_read": 30,
+  "truncated": false,
+  "warnings": []
+}
+```
+
+`read_path` says whether the reader pruned and pushed down (`DIRECT`) or fetched
+and filtered in memory (`MATERIALISED`). `partitions_read` counts files that
+actually contributed rows, not the number a glob matched — so a broken prune is
+visible here rather than only in the latency.
+
+`truncated` says a limit cut the answer short. Prices are strings, from exact
+decimals in the file: a float round trip would re-round the tick prices the venue
+published.
+
+`exclude_flagged` defaults to **false**. Rows the validator was unhappy about are
+in the partitions with their flags attached, and an outlier is often the most
+important observation in a sample.
+
+See [`warehouse.md`](warehouse.md) for the layout, the validation rules and the
+quality dimensions.
+
+## 7b. Research and backtesting **[P4-realtime]**
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/research/strategies` | the shipped strategies and the features each declares |
+| POST | `/research/backtests` | 202; run a strategy over warehouse bars |
+| GET | `/research/experiments` | the caller's runs |
+| GET | `/research/experiments/{id}` | one run, with everything needed to run it again |
+| GET | `/research/experiments/{id}/equity-curve` | the curve |
+| GET | `/research/experiments/{id}/fills` | every simulated trade, with its reason |
+
+There is deliberately **no endpoint that evaluates a strategy against today's
+market**. That would be a trading signal, and the platform does not emit those.
+A strategy's output here is a target weight for a *simulated* book.
+
+### Running
+
+```http
+POST /api/v1/research/backtests
+{"name": "crossover", "instrument_id": "...", "strategy_name": "moving_average_crossover",
+ "strategy_parameters": {"fast": 10, "slow": 30}, "exchange": "NSE",
+ "cost_components": [
+   {"name": "brokerage", "basis": "TURNOVER", "rate": "0.0003", "maximum": "20"},
+   {"name": "stt", "basis": "TURNOVER", "rate": "0.00025", "side": "SELL"},
+   {"name": "gst", "basis": "ON_OTHER_COMPONENTS", "rate": "0.18", "applies_to": ["brokerage"]}
+ ],
+ "cost_schedule_source": "rates supplied by the user",
+ "slippage_basis_points": "5"}
+
+202 {"job_id": "...", "status": "QUEUED"}
+```
+
+**Supply `cost_components` or the run is gross.** The platform holds no
+brokerage, exchange or statutory rates and will not invent them: a net return
+computed from fabricated tax rates would be wrong in a way nobody could detect.
+Without them, `gross_of_costs` is `true` on the backtest, on the metrics and on
+the experiment row, and `RESEARCH_COSTS_NOT_MODELLED` is in the warnings.
+
+`timing` is `NEXT_OPEN` or `NEXT_CLOSE`. Both are causal; there is no "same bar's
+close", because a decision that used a bar's close cannot also be filled at it.
+
+### The report
+
+```json
+{
+  "metrics": {
+    "observations": 399, "is_reliable": true,
+    "periods_per_year": 365.25, "risk_free_rate": 0.0, "gross_of_costs": false,
+    "total_return": 0.41, "cagr": 0.37, "sharpe": 1.12, "sortino": 1.44,
+    "calmar": 2.1, "max_drawdown": {"depth": -0.176, "recovery_bars": 34},
+    "value_at_risk": {"confidence": 0.95, "value_at_risk": 0.021, "is_reliable": true},
+    "trades": {"count": 18, "win_rate": 0.55, "profit_factor": 1.9, "turnover": 4.2},
+    "warnings": []
+  },
+  "attribution": {
+    "equity_change": "412034.11", "realised_pnl": "...", "unrealised_pnl": "...",
+    "costs": "1204.55", "slippage_against_reference": "8811.20",
+    "attributed": "412034.11", "residual": "0.00", "reconciles": true
+  }
+}
+```
+
+`periods_per_year` is measured from the median gap between bars, not assumed —
+every annualised figure scales by its square root, and assuming 252 on a weekly
+series would be wrong sevenfold.
+
+`cagr`, `sortino`, `profit_factor` and `calmar` are `null` where they cannot
+honestly be computed: a six-week window has no annual growth rate, a curve that
+never fell has no downside deviation, and an infinite profit factor is not a
+number worth printing.
+
+`reconciles: false` means the attribution does not add up to the equity change,
+which is a bug rather than an approximation. `slippage_against_reference` is
+reported but **not** subtracted: it is already inside the fill prices.
+
+See [`research.md`](research.md) for the look-ahead guarantees and the cost model.
+
+## 7c. Portfolio construction **[P5-realtime]**
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| POST | `/portfolio-optimisation/target` | a target portfolio, with the risk of that portfolio beside it |
+
+Five objectives: `MINIMUM_VARIANCE`, `MAXIMUM_SHARPE`, `MEAN_VARIANCE`,
+`RISK_PARITY`, `MINIMUM_CVAR`. The first and fourth need **no return forecast**,
+which is why they are there.
+
+```http
+POST /api/v1/portfolio-optimisation/target
+{"instrument_ids": ["...", "..."], "objective": "MINIMUM_VARIANCE",
+ "exchange": "NSE", "covariance_estimator": "LEDOIT_WOLF",
+ "constraints": {"budget": 1.0, "long_only": true, "maximum_weight": 0.4,
+                 "groups": [{"name": "financials", "indices": [0, 1], "maximum": 0.5}],
+                 "maximum_turnover": 0.2, "current_weights": [0.5, 0.3, 0.2]}}
+```
+
+### What it refuses
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `OPTIMISATION_REFUSED` | 422 | a return-seeking objective with no forecast, mean-variance with no risk aversion, Black-Litterman with no prior or no `tau`, or contradictory constraints — the message names which |
+| `INVALID_CONSTRAINTS` | 422 | a turnover limit with no `current_weights`, bounds that do not describe the asset count, or constraints written against an instrument list from which one was dropped for having no overlapping history — the positions they name would no longer be the instruments they were written for |
+
+A return-seeking objective with no stated forecast is refused rather than given
+sample means. Mean-variance optimisation maximises the error in its expected
+returns, and historical means are a poor forecast — substituting them quietly
+would produce a confident portfolio built on the one input the method tolerates
+error in least. Ask for them with `use_historical_means: true` and every result
+says `HISTORICAL_MEAN` and carries a warning.
+
+### The answer
+
+```json
+{
+  "results": {
+    "objective": "MINIMUM_VARIANCE",
+    "holdings": [{"symbol": "ALPHA", "weight": 0.52, "risk_contribution": 0.31}],
+    "return_source": null,
+    "risk": {"volatility": 0.081,
+             "tail": {"value_at_risk": 0.012, "expected_shortfall": 0.019, "is_reliable": true},
+             "effective_assets": 2.4, "largest_risk_contribution": 0.44, "observations": 258},
+    "covariance": {"estimator": "LEDOIT_WOLF", "shrinkage_intensity": 0.17, "observations": 258},
+    "solver": {"starts_attempted": 5, "starts_converged": 5,
+               "binding_constraints": ["asset 2 at its maximum weight"]},
+    "black_litterman": null
+  }
+}
+```
+
+**`risk_contribution` is worth more than `weight`.** A holding with 5% of the
+weight and 40% of the risk is the portfolio's real position. `effective_assets`
+is the same point at portfolio level: how many assets it is genuinely spread
+across, which for a twenty-name book is routinely two or three.
+
+`binding_constraints` says which limits the solution is sitting on — usually what
+a user wants to know when a portfolio looks odd.
+
+`shrinkage_intensity` is reported because shrinkage was asked for by name, never
+applied because a matrix looked awkward.
+
+For `MINIMUM_CVAR` the solver block carries `scenarios` and `tail_scenarios`: a
+CVaR at 95% from 100 scenarios averages five points, and five points do not
+describe a tail.
+
+See [`portfolio-construction.md`](portfolio-construction.md).
+
+## 7d. Paper trading **[P6-realtime]**
+
+Full treatment in [`docs/trading.md`](trading.md).
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/trading/accounts` | Open a book. A live account is created halted and unarmed — creating it is not the same act as deciding it may trade real money. |
+| `GET` | `/trading/accounts` | |
+| `GET` | `/trading/accounts/{id}` | |
+| `PUT` | `/trading/accounts/{id}/risk-limits` | Every limit optional, none defaulted. An account with none can trade on paper and is refused on live. |
+| `POST` | `/trading/accounts/{id}/kill-switch` | Halts the account **and cancels what is resting**. A reason is required: somebody reads it later. |
+| `DELETE` | `/trading/accounts/{id}/kill-switch` | |
+| `POST` | `/trading/accounts/{id}/orders` | Submit one order. Returns the order **and the full gate decision**, whether it was accepted or refused. |
+| `GET` | `/trading/accounts/{id}/orders` | Filter with `?status=`. |
+| `GET` | `/trading/orders/{id}` | |
+| `POST` | `/trading/orders/{id}/cancel` | `409` on a terminal order: a finished order is a record, not a thing to change. |
+| `POST` | `/trading/accounts/{id}/work` | Offer the current market to every resting order. What an exchange would do continuously; the background job calls exactly this. |
+| `GET` | `/trading/accounts/{id}/positions` | |
+| `GET` | `/trading/accounts/{id}/pnl` | `equity` is `null` when any held position has no mark, and the unpriced instruments are named. |
+| `POST` | `/trading/accounts/{id}/rebalance-preview` | The trades required to reach a target **the caller supplied**. Arithmetic, not advice. |
+| `GET` | `/trading/accounts/{id}/audit` | Append-only. Gate decisions, broker exchanges and transitions. |
+
+**A refused order is a `201`, not a `4xx`.** The order row exists with its
+rejection reason on it, and the gate decision comes back beside it. An interface
+that answers a refusal with an error and no record leaves the user unable to see
+what the gate objected to. The `4xx` codes below are for requests that never
+became orders at all.
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `INVALID_ORDER` | 422 | A limit order with no price, a market order with one, a non-positive quantity |
+| `ACCOUNT_NOT_FOUND` | 404 | Also returned for another user's account |
+| `ORDER_NOT_CANCELLABLE` | 409 | The order is already terminal |
+| `ILLEGAL_TRANSITION` | 409 | A state change no order lifecycle permits — two writers raced |
+| `ORDER_NOT_PLACED` | 422 | Including the indefinite case: the broker could not be reached, the order is left `NEW`, and it must be reconciled rather than resubmitted |
+| `DUPLICATE_TARGET` | 422 | An instrument appears twice in a rebalance target; one weight would have been silently discarded |
+| `KILL_SWITCH_REFUSED` | 422 | A halt with no reason |
+
+**Order fields worth reading.** `price_basis` on every fill says which observed
+field the price came from (`MARKET_ASK`, `MARKET_BID`, `LAST_TRADE`).
+`slippage_against_reference` is `null` without a reference — slippage against
+nothing is not a measurement. `flags` carries `PAPER_FILL_COUNTERFACTUAL` on
+every paper fill, plus `DEPTH_NOT_REPORTED`, `LIMITED_BY_DEPTH`,
+`LAST_TRADE_NOT_A_QUOTE` or `COSTS_NOT_MODELLED` where they apply.
+
+## 7e. Live trading **[P7-realtime]**
+
+Full treatment in [`docs/trading.md`](trading.md) §10. Same endpoints as §7d —
+`venue` is a field, not a separate surface. What is added is arming and working
+a parent order.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/trading/accounts/{id}/arm` | Permit this account to send real orders. Returns `200` with **every** obstacle listed when it refuses. |
+| `DELETE` | `/trading/accounts/{id}/arm` | Disarm. Not the kill switch: this pauses and leaves resting orders alone. |
+| `POST` | `/trading/accounts/{id}/parent-orders` | Place the child orders whose slice window is open now. Call repeatedly across the window. |
+
+**Three independent gates guard a live order.** `live_trading_enabled` on the
+deployment (default `false`), `live_armed_at` on the account, and
+`verified_against_documentation` on the broker adapter (default `false`). All
+three must be open. The third exists because a wrong field name in an adapter
+fails loudly, whereas a wrong *status* mapping tells the platform an order filled
+when it did not — and the book is then wrong with nothing reporting a problem.
+
+**Parent orders are idempotent per slice.** Child order ids derive from
+`parent_client_order_id`, so calling the endpoint repeatedly across the working
+window places each slice exactly once. A slice whose window has closed is
+reported in `missed` and **not** placed late.
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `SCHEDULE_REFUSED` | 422 | A VWAP with no volume profile, a POV with no ADV, a profile that does not line up with the window |
+| `ARMING_REFUSED` | 422 | The request could not be evaluated. Ordinary refusals come back `200` with reasons. |
 
 ## 8. Jobs **[P0]**
 

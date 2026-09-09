@@ -24,10 +24,18 @@ MIN_OBSERVATIONS_PER_FACTOR = 10
 
 class CovarianceEstimator(StrEnum):
     SAMPLE = "SAMPLE"
+    #: Ledoit-Wolf shrinkage towards a constant-correlation target, with the
+    #: intensity computed analytically rather than tuned. Offered as an explicit
+    #: choice and never as a default: shrinking is a modelling decision, and the
+    #: intensity it chose is reported so the decision stays visible.
+    LEDOIT_WOLF = "LEDOIT_WOLF"
 
 
 class CovarianceWarning(StrEnum):
     FEW_OBSERVATIONS = "COVARIANCE_FEW_OBSERVATIONS"
+    #: Shrinkage pulled the estimate most of the way to the target, which means
+    #: the sample said very little. Worth knowing before optimising on it.
+    HEAVY_SHRINKAGE = "COVARIANCE_HEAVY_SHRINKAGE"
     RANK_DEFICIENT = "COVARIANCE_RANK_DEFICIENT"
     ZERO_VARIANCE_FACTOR = "COVARIANCE_ZERO_VARIANCE_FACTOR"
 
@@ -39,6 +47,9 @@ class CovarianceEstimate:
     covariance: np.ndarray
     observations: int
     estimator: CovarianceEstimator
+    #: How far the estimate was pulled towards the shrinkage target, in [0, 1].
+    #: ``None`` for the sample estimator, which shrinks nothing.
+    shrinkage_intensity: float | None = None
     warnings: tuple[str, ...] = ()
 
     @property
@@ -50,6 +61,7 @@ class CovarianceEstimate:
             "factors": list(self.factors),
             "observations": self.observations,
             "estimator": str(self.estimator),
+            "shrinkage_intensity": self.shrinkage_intensity,
             "mean": [float(x) for x in self.mean],
             "volatility": [float(x) for x in self.volatilities],
             "correlation": [[float(x) for x in row] for row in self.correlation()],
@@ -118,3 +130,69 @@ def nearest_positive_semidefinite(matrix: np.ndarray) -> tuple[np.ndarray, bool]
         return symmetric, False
     clipped = np.clip(eigenvalues, 0.0, None)
     return eigenvectors @ np.diag(clipped) @ eigenvectors.T, True
+
+
+def ledoit_wolf_covariance(factors: Sequence[str], returns: np.ndarray) -> CovarianceEstimate:
+    """Sample covariance shrunk towards a constant-correlation target.
+
+    Ledoit & Wolf (2003), *Honey, I Shrunk the Sample Covariance Matrix*. The
+    sample estimate is noisy when observations are not many times the number of
+    assets, and the noise lands hardest on the smallest eigenvalues — which is
+    exactly where a mean-variance optimiser looks for its cleverest trades. The
+    shrinkage intensity is derived from the data rather than chosen, which is
+    what makes this an estimator rather than a knob.
+
+    It is not the default. The platform's rule is that a regularisation which
+    makes a matrix invertible is a modelling decision the user should see, so
+    this is asked for by name and the intensity it picked is reported.
+    """
+    sample = sample_covariance(factors, returns)
+    observations = sample.observations
+    if observations < 2:
+        return sample
+
+    data = np.asarray(returns, dtype=float)
+    centred = data - data.mean(axis=0, keepdims=True)
+    count, size = centred.shape
+
+    covariance = sample.covariance
+    volatilities = sample.volatilities
+    safe = np.where(volatilities > 0.0, volatilities, 1.0)
+    correlation = covariance / np.outer(safe, safe)
+
+    off_diagonal = correlation[~np.eye(size, dtype=bool)]
+    average_correlation = float(np.mean(off_diagonal)) if off_diagonal.size else 0.0
+    target = average_correlation * np.outer(volatilities, volatilities)
+    np.fill_diagonal(target, np.diag(covariance))
+
+    # pi: summed variance of the sample covariance entries.
+    squared = centred**2
+    pi_matrix = (
+        (squared.T @ squared) / count
+        - 2.0 * covariance * ((centred.T @ centred) / count)
+        + covariance**2
+    )
+    pi = float(np.sum(pi_matrix))
+
+    # gamma: squared distance from the sample estimate to the target.
+    gamma = float(np.sum((target - covariance) ** 2))
+
+    # rho is dropped: the constant-correlation target's cross term is a long
+    # expression whose contribution is small, and Ledoit and Wolf's own
+    # simplified estimator omits it. Stated rather than silently dropped.
+    intensity = 0.0 if gamma <= 0 else max(0.0, min(1.0, (pi / gamma) / count))
+
+    shrunk = intensity * target + (1.0 - intensity) * covariance
+    warnings = list(sample.warnings)
+    if intensity > 0.5:
+        warnings.append(str(CovarianceWarning.HEAVY_SHRINKAGE))
+
+    return CovarianceEstimate(
+        factors=sample.factors,
+        mean=sample.mean,
+        covariance=shrunk,
+        observations=observations,
+        estimator=CovarianceEstimator.LEDOIT_WOLF,
+        shrinkage_intensity=intensity,
+        warnings=tuple(warnings),
+    )

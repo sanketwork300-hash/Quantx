@@ -12,7 +12,7 @@ from api.dependencies.core import (
     MarketDataServiceDep,
     SettingsDep,
 )
-from api.errors import NotFound
+from api.errors import NotFound, UnprocessableEntity
 from api.schemas.common import Envelope, ProvenanceOut
 from api.schemas.market import (
     ChainCountsOut,
@@ -22,6 +22,9 @@ from api.schemas.market import (
     OptionQuoteOut,
     QualityOut,
 )
+from api.schemas.options import OpenInterestChangeOut, OpenInterestProfileOut
+from domains.market_data.open_interest import build_change as build_open_interest_change
+from domains.market_data.open_interest import build_profile as build_open_interest_profile
 from domains.market_data.orm import OptionChainSnapshotORM, OptionQuoteORM
 
 router = APIRouter(prefix="/market", tags=["market-data"])
@@ -190,6 +193,83 @@ async def get_latest_chain(
         quotes=[_quote_out(row) for row in rows],
     )
     return _envelope(snapshot, results)
+
+
+@router.get("/open-interest/{underlying_id}", response_model=OpenInterestProfileOut)
+async def open_interest_profile(
+    underlying_id: uuid.UUID,
+    user: CurrentUser,
+    market_data: MarketDataServiceDep,
+    instruments: InstrumentServiceDep,
+    snapshot_id: uuid.UUID | None = None,
+    include_strikes: bool = False,
+) -> OpenInterestProfileOut:
+    """Open interest and volume across the chain, and the ratios between them.
+
+    Arithmetic, reported as arithmetic. A put-call ratio is widely read as a
+    sentiment indicator on evidence that is thin and regime-dependent; this
+    endpoint gives the ratio and the counts behind it, and says nothing about
+    what it means.
+    """
+    if await instruments.get(underlying_id) is None:
+        raise NotFound("Instrument")
+
+    snapshot = (
+        await market_data.get_chain_snapshot(snapshot_id, user.id)
+        if snapshot_id is not None
+        else await market_data.latest_chain_snapshot(user.id, underlying_id)
+    )
+    if snapshot is None:
+        raise NotFound("Chain snapshot")
+
+    rows = await market_data.open_interest_rows(snapshot.id, include_excluded=True)
+    profile = build_open_interest_profile(
+        underlying_id=underlying_id,
+        as_of=snapshot.as_of_timestamp,
+        rows=rows,
+        snapshot_id=snapshot.id,
+    )
+    return OpenInterestProfileOut.model_validate(profile.to_dict(include_strikes))
+
+
+@router.get("/open-interest/{underlying_id}/change", response_model=OpenInterestChangeOut)
+async def open_interest_change(
+    underlying_id: uuid.UUID,
+    user: CurrentUser,
+    market_data: MarketDataServiceDep,
+    instruments: InstrumentServiceDep,
+) -> OpenInterestChangeOut:
+    """How open interest moved between the two most recent snapshots.
+
+    Two observations, so the answer is a change over a window and is reported
+    with that window on it. Without ``window_seconds`` a figure measured over
+    eleven minutes reads exactly like one measured over a session.
+    """
+    if await instruments.get(underlying_id) is None:
+        raise NotFound("Instrument")
+
+    snapshots = await market_data.list_chain_snapshots(
+        user.id, underlying_id=underlying_id, limit=2
+    )
+    if len(snapshots) < 2:
+        raise UnprocessableEntity(
+            "OPEN_INTEREST_NEEDS_TWO_SNAPSHOTS",
+            "A change is a difference between two observations, and only "
+            f"{len(snapshots)} snapshot(s) of this underlying exist.",
+            snapshots_available=len(snapshots),
+        )
+
+    later, earlier = snapshots[0], snapshots[1]
+    change = build_open_interest_change(
+        underlying_id=underlying_id,
+        earlier_as_of=earlier.as_of_timestamp,
+        later_as_of=later.as_of_timestamp,
+        earlier=await market_data.open_interest_rows(earlier.id, include_excluded=True),
+        later=await market_data.open_interest_rows(later.id, include_excluded=True),
+        earlier_snapshot_id=earlier.id,
+        later_snapshot_id=later.id,
+    )
+    return OpenInterestChangeOut.model_validate(change.to_dict())
 
 
 @router.get("/quotes/{instrument_id}", response_model=MarketQuoteOut)

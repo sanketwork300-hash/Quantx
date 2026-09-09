@@ -26,6 +26,7 @@ export default function RootLayout({
                 <Link href="/">Dashboard</Link>
                 <div className="group">Markets</div>
                 <Link href="/live">Live market</Link>
+                <Link href="/live/options">Live options</Link>
                 <Link href="/markets/chains">Option chains</Link>
                 <Link href="/markets/analyses">Volatility analyses</Link>
                 <Link href="/markets/surfaces">Surfaces</Link>
@@ -33,14 +34,19 @@ export default function RootLayout({
                 <Link href="/markets/consensus">Model consensus</Link>
                 <div className="group">Portfolio</div>
                 <Link href="/portfolios">Portfolios</Link>
+                <Link href="/portfolios/construct">Construction</Link>
                 <Link href="/scenarios">Scenarios</Link>
                 <Link href="/order-analysis">Order analysis</Link>
                 <div className="group">Execution</div>
                 <Link href="/execution">Trade analysis</Link>
                 <Link href="/execution/simulate">Simulation</Link>
                 <Link href="/microstructure">Order book</Link>
+                <Link href="/trading">Paper trading</Link>
                 <div className="group">Data</div>
                 <Link href="/data">Imports</Link>
+                <Link href="/warehouse">Warehouse</Link>
+                <div className="group">Research</div>
+                <Link href="/research">Backtests</Link>
                 <div className="group">Account</div>
                 <Link href="/login">Sign in</Link>
                 <Link href="/connections">Broker connections</Link>

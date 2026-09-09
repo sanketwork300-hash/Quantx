@@ -359,6 +359,133 @@ matched against renderings of the two candidate dates rather than parsed, so a
 name format the code cannot read degrades to "could not resolve" instead of
 producing a third date.
 
+### Testing a surface against the market it was made from
+
+`tests/integration/test_live_options.py` runs the whole Phase 2 path — capture,
+implied volatilities, SVI calibration, delta skew — with one substitution: the
+live quotes come from the seeded synthetic market rather than a feed.
+
+That substitution is what makes the test worth having. The synthetic market
+generates an arbitrage-clean chain from an admissible SVI slice with a **known
+negative rho**, so the fitted 25-delta risk reversal must come back negative.
+`test_the_skew_has_the_sign_the_generated_market_was_given` is therefore
+checking a round trip through the IV solver, the calibrator and the delta solve
+against a truth that was put in on purpose. A sign error anywhere along that
+path would be invisible in every other test in the suite, because every other
+number would still look like a plausible volatility.
+
+`tests/unit/test_delta_skew.py` covers the solve itself, and its most useful
+tests are the refusals. `test_a_delta_that_occurs_nowhere_is_reported_not_widened_into`
+fails if the search range is ever widened to find a root, which would put a
+strike far outside the traded market into a skew number.
+`test_a_smile_whose_delta_turns_back_on_itself_is_refused` covers the case where
+the wings break the no-arbitrage slope bound and a delta level occurs at more
+than one strike — reported as unmeasurable rather than resolved by picking one
+of them.
+
+`tests/unit/test_open_interest.py` guards three arithmetic mistakes that all
+produce numbers which plot perfectly well: summing absences as zeros, dividing
+by a zero denominator, and reporting a change without its window.
+`test_the_ratio_is_reported_without_being_interpreted` scans the whole response
+body for the vocabulary a reading would use — the language policy enforced as a
+test rather than as a review habit.
+
+### Testing a loader that must not tidy up after itself
+
+`tests/unit/test_warehouse_validation.py` is mostly about what is *still there*
+after validation. `test_a_bad_tick_is_flagged_and_kept` asserts both halves —
+flagged, and `rows_written == 60`. `test_the_split_is_reported_and_never_repaired`
+asserts the post-split rows still hold the unadjusted prices the file gave. A
+loader that quietly tidied its input would pass a test that only checked the
+finding was raised.
+
+Two of these tests were written wrong first and are worth recording. One asserted
+that a robust z-score would catch a spike in a *constant* series; it does not,
+because `MAD = 0` there by construction — which turned out to be a real blind
+spot for a barely-moving series, and the fix was the documented mean-absolute-
+deviation fallback. The other, in the integration file, asserted that a naive
+timestamp is refused; it was not, because the shared CSV parser defaults naive
+timestamps to UTC. That is right for an option chain and wrong for a year of
+bars, and the reader now inspects the source text so the rule actually fires.
+Both bugs were invisible until a test made a claim about behaviour rather than
+about code.
+
+`tests/unit/test_warehouse_storage.py` guards the partition layout, which is what
+makes "queryable" a real property rather than a wrapper around a full scan.
+`test_a_date_range_reads_only_the_days_it_needs` asserts `partitions_read`, which
+counts files that actually contributed rows — so a broken prune fails a test
+instead of merely being slow.
+
+`tests/integration/test_warehouse.py` runs the acceptance path and then the
+refusals: a quarantined dataset is not served, a symbol that resolves to nothing
+is reported rather than attached to the nearest candidate, and a file missing a
+required column fails *as a read* rather than registering an empty dataset that
+would look exactly like a file with no rows in it.
+
+### Testing that a backtest is not lying
+
+Three ways a backtest reports a return nobody could have earned, and a family of
+tests for each.
+
+**It saw the future.** `tests/unit/test_features.py` asserts a *property*:
+computing a feature over a truncated series must give the same value at its last
+bar as computing it over the whole series. A feature that peeked would disagree,
+and would disagree silently. It is parameterised over every feature shipped, so
+adding one without the property is a failing test rather than a review comment.
+`tests/unit/test_backtest.py::TestFillsCannotSeeTheFuture` covers the other half:
+a decision on bar `t` is filled on bar `t+1`, and a signal on the final bar is
+recorded rather than executed.
+
+**It traded for free.** `test_no_schedule_means_gross_and_says_so` fails if the
+absence of a cost model ever starts reading as zero cost rather than as a gross
+run. The cost tests then pin the schedule's own behaviour — a sell-only levy not
+charged on a buy, a cap that binds, a derived component seeing only the
+components it applies to.
+
+**Its accounting was wrong.** `TestTheAccountingBenchmark` is the most valuable
+class in the phase. Buy-and-hold's return has to match the instrument's own
+return over the window it was held, and the expected final equity is computed
+independently — cash left plus quantity times the last close — rather than by
+asking the engine twice. When that fails, the bug is in the engine, and no Sharpe
+ratio would have found it. `TestAttribution::test_the_identity_closes` does the
+same for the decomposition.
+
+One test in this phase was written wrong and is worth recording:
+`test_an_ema_weights_recent_bars_more` asserted that an EMA exceeds an SMA on a
+rising series. On a *straight-line* trend the two have identical lag, so it
+failed by a float hair. The property that actually holds is about recent
+information — after a step change the EMA is nearer the new level — and the test
+now says that instead.
+
+### Testing an optimiser, where the inputs are the risk
+
+`tests/unit/test_portfolio_optimisation.py` is mostly not about arithmetic. The
+objectives are textbook; what can go wrong is the inputs, so most of the tests
+are about what the optimiser declines to invent —
+`test_a_return_seeking_objective_with_no_forecast_is_refused`,
+`test_mean_variance_without_a_risk_aversion_is_refused`,
+`test_black_litterman_without_tau_is_refused`, and
+`test_a_turnover_limit_without_a_starting_point_is_refused`.
+
+The arithmetic tests that do matter are the ones with an answer known in advance.
+`test_it_beats_every_single_asset` checks that a minimum-variance portfolio is
+below the lowest single-asset volatility — the claim of diversification, and a
+check that the objective is being minimised rather than merely evaluated.
+`test_every_asset_contributes_the_same_risk` checks risk parity against its own
+definition. `test_with_no_views_the_posterior_is_the_prior` checks that
+Black-Litterman with no views is the identity, which a sign error in the
+precision-weighting would break.
+
+`test_it_avoids_the_asset_variance_cannot_see` is the one that justifies having
+CVaR at all: an asset is given a fat left tail with an ordinary variance, and the
+CVaR optimiser avoids it while a mean-variance one would not. Without that
+asymmetry in the fixture the test would pass whatever the objective did.
+
+The infeasibility tests assert on the *message*, not just the exception.
+"No solution" is a useless answer when six constraints are in play, and
+`test_a_minimum_above_a_maximum_is_named_per_asset` fails if the diagnosis ever
+stops naming the offending asset.
+
 ## 5. Regression / golden files
 
 Committed fixtures with committed expected outputs:
@@ -427,3 +554,39 @@ No test asserts that the platform's reference value is "correct" in the sense of
 predicting a market price. The reference value is a model output; tests assert it
 is *computed correctly, reproducibly, and with honest uncertainty*, which is the
 only claim the product makes.
+
+
+## Trading (Phases 6 and 7)
+
+`tests/unit/test_trading_oms.py` (46) and `tests/unit/test_live_trading.py` (31)
+cover the parts that decide things: the order lifecycle's transition table, the
+paper fill engine, the pre-trade gate, the Upstox payload mapping and the
+schedule. All pure — no database, no event loop, no market — because the rules
+that decide whether a fill is honest should be readable without one.
+
+`tests/integration/test_paper_trading.py` (39) runs the acceptance path end to
+end: an Upstox frame goes through the real normalisation into the live store, an
+order is gated, filled against that quote, booked, and reaches the P&L. The only
+substitution is that the frames are scripted rather than arriving on a socket.
+
+Two structural tests are worth naming.
+
+**`test_replaying_the_fills_reproduces_the_stored_position`** rebuilds the book
+from the fill rows and compares quantity, average price and realised P&L against
+the stored position. Positions are stored rather than replayed because a live
+risk view cannot walk a year of fills per request; that optimisation is only safe
+while the two agree, so the agreement is asserted rather than assumed.
+
+**`test_the_database_refuses_an_order_that_filled_more_than_it_asked`** exists
+because of a dialect bug found while building Phase 6. `DecimalType` is NUMERIC on
+Postgres and TEXT elsewhere, so a CHECK written as `filled_quantity <= quantity`
+compares *strings* on SQLite — where `'4' <= '10'` is false and `'40' <= '10'` is
+true. The constraint would have rejected the honest case and admitted the
+impossible one. Every decimal comparison in the trading tables now casts to
+NUMERIC, and this test asserts the constraint bites on the dialect where it would
+otherwise silently invert.
+
+No test in this repository can reach a live broker. The order transport is a
+protocol with a recorded-payload implementation in tests, and the Upstox adapter
+additionally refuses to place an order at all unless
+`verified_against_documentation` is set — which nothing in this repository sets.

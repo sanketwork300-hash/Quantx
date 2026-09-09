@@ -36,6 +36,7 @@ from api.schemas.live import (
     SubscriptionRequest,
 )
 from api.schemas.market import QualityOut
+from api.schemas.options import LiveChainAnalysisRequest
 from api.schemas.uploads import JobAcceptedOut
 from domains.jobs.dispatcher import submit_job
 from domains.jobs.models import JobStatus, JobType
@@ -222,6 +223,60 @@ async def live_state(
         unavailable=unavailable,
         quotes=payload.get("quotes", {}) if include_quotes else {},
     )
+
+
+@router.post(
+    "/options/analyse",
+    response_model=JobAcceptedOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def analyse_live_options(
+    payload: LiveChainAnalysisRequest,
+    user: CurrentUser,
+    jobs: JobServiceDep,
+    instruments: InstrumentServiceDep,
+    session: SessionDep,
+    settings: SettingsDep,
+) -> JobAcceptedOut:
+    """Capture the live chain and take it through to a fitted surface.
+
+    Four stages behind one action: capture into a stored snapshot, solve implied
+    volatilities, fit SVI, read the delta-quoted skew off the fit. They run as a
+    job because an SVI calibration across a dozen expiries is seconds of
+    numerical work, and against one captured moment because a surface assembled
+    from prices minutes apart is a surface of a market that never existed.
+
+    Poll ``GET /jobs/{id}``. The result carries the snapshot, analysis and
+    surface identifiers, so every number traces back to the quotes it came from.
+    """
+    underlying = await instruments.get(payload.underlying_id)
+    if underlying is None:
+        raise NotFound("Instrument")
+
+    job = await jobs.create(
+        user.id,
+        JobType.ANALYSE_LIVE_CHAIN,
+        {
+            "underlying_id": str(payload.underlying_id),
+            "expiry": payload.expiry.isoformat() if payload.expiry else None,
+            "risk_free_rate": payload.risk_free_rate,
+            "dividend_yield": payload.dividend_yield,
+            "settlement_time_utc": (
+                payload.settlement_time_utc.isoformat() if payload.settlement_time_utc else None
+            ),
+            "calibrate": payload.calibrate,
+        },
+    )
+    await UserService(session).audit(
+        AuditAction.JOB_SUBMITTED,
+        user_id=user.id,
+        resource_type="job",
+        resource_id=str(job.id),
+        job_type=str(JobType.ANALYSE_LIVE_CHAIN),
+    )
+    await session.commit()
+    await submit_job(job.id, settings)
+    return JobAcceptedOut(job_id=job.id, status=str(JobStatus.QUEUED))
 
 
 @router.post(

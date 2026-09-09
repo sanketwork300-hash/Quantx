@@ -11,6 +11,7 @@ from pathlib import PurePosixPath
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from domains.instruments.enums import OptionType
 from domains.instruments.service import InstrumentService
 from domains.market_data.enums import UploadKind, UploadStatus
 from domains.market_data.ingestion.column_mapping import (
@@ -32,11 +33,15 @@ from domains.market_data.ingestion.pipeline import (
     OptionChainIngestionPipeline,
     OptionChainIngestionRequest,
 )
+from domains.market_data.live_chain import LiveChainCaptureSummary
+from domains.market_data.open_interest import ChainRow
 from domains.market_data.orm import OptionChainSnapshotORM, OptionQuoteORM, UploadORM
 from domains.market_data.quality.config import MarketDataQualityConfig
-from domains.market_data.quality.flags import MarketDataQuality, QualityFlag
+from domains.market_data.quality.engine import MarketDataQualityEngine
+from domains.market_data.quality.flags import MarketDataQuality, QualityFlag, Severity
 from domains.market_data.repository import MarketDataRepository
 from domains.reports.envelope import AnalyticalResult
+from infrastructure.cache.client import Cache, get_cache
 from infrastructure.settings import Settings
 from infrastructure.storage.base import ObjectStore
 
@@ -324,6 +329,18 @@ class MarketDataService:
     ) -> OptionChainSnapshotORM | None:
         return await self.repository.get_chain_snapshot(snapshot_id, user_id=user_id)
 
+    async def list_chain_snapshots(
+        self,
+        user_id: uuid.UUID,
+        underlying_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        """Chain snapshots, newest first."""
+        return await self.repository.list_chain_snapshots(
+            user_id, underlying_id=underlying_id, limit=limit, offset=offset
+        )
+
     async def latest_chain_snapshot(
         self, user_id: uuid.UUID, underlying_id: uuid.UUID
     ) -> OptionChainSnapshotORM | None:
@@ -475,6 +492,62 @@ class MarketDataService:
     ) -> AnalyticalResult[IngestionSummary]:
         """Ingest without an upload row (research mode, provider imports, tests)."""
         return await self._pipeline().ingest(data, request)
+
+    # ---------------------------------------------------------- live capture
+    async def capture_live_chain(
+        self,
+        user_id: uuid.UUID,
+        underlying_id: uuid.UUID,
+        expiry=None,
+        exclusion_threshold: Severity = Severity.ERROR,
+        cache: Cache | None = None,
+        as_of: datetime | None = None,
+    ) -> AnalyticalResult[LiveChainCaptureSummary]:
+        """Write the live cache's view of a chain into a stored snapshot.
+
+        Exposed on the service rather than as a free function because the
+        capture writes market-data rows, and no other domain may reach for this
+        domain's repository to do that.
+        """
+        from domains.market_data.live_chain import LiveChainCaptureService
+        from domains.market_data.streaming.live_state import LiveMarketStore
+
+        service = LiveChainCaptureService(
+            instruments=self.instruments,
+            repository=self.repository,
+            store=LiveMarketStore(
+                cache or get_cache(self._settings), self._settings.live_quote_ttl_seconds
+            ),
+            settings=self._settings,
+            quality=MarketDataQualityEngine(self._quality_config),
+        )
+        return await service.capture(
+            user_id=user_id,
+            underlying_id=underlying_id,
+            expiry=expiry,
+            exclusion_threshold=exclusion_threshold,
+            as_of=as_of,
+        )
+
+    async def open_interest_rows(
+        self, snapshot_id: uuid.UUID, include_excluded: bool = False
+    ) -> list[ChainRow]:
+        """The stored quotes of a snapshot, in the shape the OI arithmetic needs."""
+        rows = await self.repository.get_option_quotes(
+            snapshot_id, include_excluded=include_excluded
+        )
+        return [
+            ChainRow(
+                instrument_id=row.instrument_id,
+                expiry=row.expiry,
+                strike=row.strike,
+                option_type=OptionType(row.option_type),
+                open_interest=row.open_interest,
+                volume=row.volume,
+                excluded=row.excluded,
+            )
+            for row in rows
+        ]
 
 
 def _jsonable(value):

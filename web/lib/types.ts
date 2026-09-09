@@ -1910,3 +1910,503 @@ export interface Subscription {
   instrument_ids: string[];
   ttl_seconds: number;
 }
+
+// ------------------------------------------------------ live options (Phase 2)
+
+export interface LiveChainCapture {
+  snapshot_id: string;
+  underlying_id: string;
+  as_of: string;
+  contracts_considered: number;
+  quotes_kept: number;
+  quotes_excluded: number;
+  contracts_without_quotes: number;
+  /** input == kept + excluded + without_quotes. */
+  conserved: boolean;
+  underlying_price: string | null;
+  /** How much of an instant the "snapshot" really is. */
+  timestamp_spread_seconds: number;
+  oldest_quote_age_seconds: number;
+}
+
+export interface LiveOptionsResult {
+  underlying_id: string;
+  expiry: string | null;
+  capture: LiveChainCapture;
+  stages: Record<string, string>;
+  warnings: AnalyticalWarning[];
+  analysis_id?: string;
+  analysis?: { counts: { quotes: number; solved: number; expiries: number } };
+  greeks?: ChainGreeksSummary;
+  surface_id?: string;
+  surface?: Record<string, unknown>;
+  delta_skew?: SurfaceDeltaSkew;
+}
+
+export interface DeltaStrike {
+  target_delta: number;
+  option_type: string;
+  status: string;
+  delta_convention: string;
+  log_moneyness: number | null;
+  strike: number | null;
+  volatility: number | null;
+  residual: number | null;
+}
+
+export interface DeltaSmile {
+  delta_level: number;
+  delta_convention: string;
+  atm_volatility: number;
+  /** Null when a wing could not be found — not the same as a skew of zero. */
+  risk_reversal: number | null;
+  butterfly: number | null;
+  call: DeltaStrike;
+  put: DeltaStrike;
+}
+
+export interface SliceDeltaSkew {
+  expiry: string;
+  time_to_expiry: number;
+  forward: number;
+  atm_volatility: number;
+  degraded: boolean;
+  smiles: DeltaSmile[];
+}
+
+export interface SurfaceDeltaSkew {
+  surface_id: string;
+  as_of: string;
+  delta_convention: string;
+  model_version: string;
+  levels: number[];
+  slices: SliceDeltaSkew[];
+  unmeasured: { expiry: string; reason: string }[];
+}
+
+export interface StrikeOpenInterest {
+  strike: string;
+  call_open_interest: string | null;
+  put_open_interest: string | null;
+  total_open_interest: string | null;
+  call_volume: string | null;
+  put_volume: string | null;
+  put_call_ratio_open_interest: number | null;
+}
+
+export interface ExpiryOpenInterest {
+  expiry: string;
+  call_open_interest: string | null;
+  put_open_interest: string | null;
+  total_open_interest: string | null;
+  call_volume: string | null;
+  put_volume: string | null;
+  total_volume: string | null;
+  put_call_ratio_open_interest: number | null;
+  put_call_ratio_volume: number | null;
+  volume_to_open_interest: number | null;
+  contracts: number;
+  contracts_with_open_interest: number;
+  coverage: number | null;
+  most_open_interest: StrikeOpenInterest[];
+  strikes: StrikeOpenInterest[];
+}
+
+export interface OpenInterestProfile {
+  underlying_id: string;
+  snapshot_id: string | null;
+  as_of: string;
+  /** The venue's unit, unnormalised: contracts on some exchanges, units of the
+   * underlying on others. Ratios cancel it; totals cannot. */
+  open_interest_unit: string;
+  model_version: string;
+  call_open_interest: string | null;
+  put_open_interest: string | null;
+  put_call_ratio_open_interest: number | null;
+  excluded_contracts: number;
+  expiries: ExpiryOpenInterest[];
+}
+
+export interface ChainGreeksSummary {
+  volatility_source: string;
+  risk_free_rate: number;
+  dividend_yield: number;
+  /** A wrong carry moves every delta, so this travels with the answer. */
+  dividend_yield_assumed: boolean;
+  units: Record<string, string>;
+  counts: { priced: number; unavailable: number };
+  expiries: {
+    expiry: string;
+    forward: number | null;
+    counts: { priced: number; unavailable: number };
+    /** Contracts with no Greeks and the reason — never a row of zeros. */
+    unavailable: { strike: number; option_type: string; reason: string }[];
+  }[];
+}
+
+// ------------------------------------------------- historical warehouse (P3)
+
+export type DatasetLayer = "raw" | "normalized" | "derived";
+export type DatasetKind = "bars" | "trades" | "quotes";
+export type DatasetStatus = "REGISTERED" | "AVAILABLE" | "QUARANTINED";
+export type CorporateActionTreatment =
+  | "UNADJUSTED"
+  | "ADJUSTED_BY_SOURCE"
+  | "UNKNOWN";
+
+export interface DatasetQuality {
+  completeness_score: number | null;
+  consistency_score: number | null;
+  outlier_score: number | null;
+  /** Provenance completeness, not a ranking of vendors. */
+  source_score: number | null;
+  /** Null for an archive: not measurable, which is not the same as zero. */
+  freshness_score: number | null;
+  overall_score: number | null;
+}
+
+export interface WarehouseDataset {
+  id: string;
+  name: string;
+  layer: DatasetLayer;
+  kind: DatasetKind;
+  exchange: string;
+  status: DatasetStatus;
+  source: string | null;
+  corporate_action_treatment: CorporateActionTreatment;
+  continuous: boolean;
+  rows_in: number;
+  rows_written: number;
+  rows_excluded: number;
+  rows_rejected: number;
+  rows_flagged: number;
+  instrument_count: number;
+  partition_count: number;
+  bytes_written: number;
+  first_observation: string | null;
+  last_observation: string | null;
+  quality: DatasetQuality;
+  created_at: string;
+}
+
+export interface WarehouseDatasetDetail extends WarehouseDataset {
+  dataset_digest: string | null;
+  quality_evidence: Record<string, unknown>;
+  validation_summary: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+}
+
+export interface WarehouseFinding {
+  code: string;
+  severity: string;
+  message: string;
+  row_number: number | null;
+  instrument_id: string | null;
+  evidence: Record<string, unknown>;
+}
+
+export interface WarehouseFindings {
+  findings: WarehouseFinding[];
+  excluded: WarehouseFinding[];
+  rejected: WarehouseFinding[];
+}
+
+export interface WarehouseQueryRows {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  row_count: number;
+  /** DIRECT means the reader pruned and pushed down; MATERIALISED means
+   * partitions were fetched and filtered in memory. */
+  read_path: string;
+  /** Partitions that contributed rows, not the number a glob matched. */
+  partitions_read: number;
+  truncated: boolean;
+  warnings: string[];
+}
+
+// -------------------------------------------- research and backtesting (P4)
+
+export interface StrategyDescriptor {
+  name: string;
+  version: string;
+  /** The features it declares it needs, visible before a run. */
+  features: string[];
+  parameters: Record<string, unknown>;
+}
+
+export interface CostComponentInput {
+  name: string;
+  basis: "TURNOVER" | "PER_UNIT" | "PER_ORDER" | "ON_OTHER_COMPONENTS";
+  rate: string;
+  side?: "BOTH" | "BUY" | "SELL";
+  maximum?: string | null;
+  applies_to?: string[];
+}
+
+export interface ExperimentSummary {
+  id: string;
+  name: string;
+  status: string;
+  instrument_id: string;
+  dataset_id: string | null;
+  strategy_name: string;
+  strategy_version: string;
+  start_timestamp: string;
+  end_timestamp: string;
+  initial_equity: string;
+  final_equity: string;
+  total_costs: string;
+  total_slippage: string;
+  /** True when no cost schedule was supplied: every return here is gross. */
+  gross_of_costs: boolean;
+  total_return: number | null;
+  cagr: number | null;
+  sharpe: number | null;
+  sortino: number | null;
+  max_drawdown: number | null;
+  bars_in: number;
+  bars_used: number;
+  fill_count: number;
+  created_at: string;
+}
+
+export interface ExperimentDetail extends ExperimentSummary {
+  strategy_parameters: Record<string, unknown>;
+  features: string[];
+  engine_config: Record<string, unknown>;
+  /** Verbatim. A net return means nothing without what was deducted from it. */
+  cost_schedule: Record<string, unknown>;
+  slippage_model: Record<string, unknown>;
+  code_commit: string;
+  data_digest: string | null;
+  traded_notional: string;
+  metrics: Record<string, any>;
+  attribution: Record<string, any>;
+  warnings: { code: string; severity: string; message: string }[];
+  provenance: Record<string, unknown>;
+}
+
+export interface EquityPoint {
+  timestamp: string;
+  equity: string;
+  cash: string;
+  market_value: string;
+  gross_exposure: string;
+  costs: string;
+  slippage: string;
+}
+
+// ------------------------------------------- portfolio construction (P5)
+
+export type OptimisationObjective =
+  | "MINIMUM_VARIANCE"
+  | "MAXIMUM_SHARPE"
+  | "MEAN_VARIANCE"
+  | "RISK_PARITY"
+  | "MINIMUM_CVAR";
+
+export interface TargetHolding {
+  instrument_id: string;
+  symbol: string;
+  weight: number;
+  /** Share of portfolio variance. Often very different from the weight, and the
+   * difference is where the portfolio's real bet is. */
+  risk_contribution: number;
+}
+
+export interface PortfolioRisk {
+  volatility: number;
+  tail: Record<string, any>;
+  /** How many assets the book is genuinely spread across. */
+  effective_assets: number;
+  gross_exposure: number;
+  net_exposure: number;
+  largest_weight: number;
+  largest_risk_contribution: number;
+  observations: number;
+  interpretation: Record<string, string>;
+}
+
+export interface TargetPortfolio {
+  objective: OptimisationObjective;
+  holdings: TargetHolding[];
+  risk: PortfolioRisk;
+  expected_return: number | null;
+  sharpe: number | null;
+  /** Where the return forecast came from — the field to read first. */
+  return_source: string | null;
+  covariance: Record<string, any>;
+  solver: Record<string, any>;
+  black_litterman: Record<string, any> | null;
+  constraints: Record<string, any>;
+}
+
+// ---------------------------------------------------------------- trading
+
+export type OrderStatus =
+  | "NEW"
+  | "ACKNOWLEDGED"
+  | "PARTIALLY_FILLED"
+  | "FILLED"
+  | "CANCELLED"
+  | "REJECTED";
+
+export interface TradingAccount {
+  id: string;
+  name: string;
+  venue: "PAPER" | "LIVE";
+  broker: string;
+  base_currency: string;
+  cash: string;
+  opening_cash: string;
+  cost_schedule: { name: string; source: string; models_costs: boolean };
+  fill_policy: string;
+  max_quote_age_seconds: number;
+  risk_limits: Record<string, unknown> & { any_set: boolean };
+  kill_switch_engaged: boolean;
+  kill_switch_engaged_at: string | null;
+  kill_switch_reason: string | null;
+  live_armed_at: string | null;
+  created_at: string;
+}
+
+export interface OrderFill {
+  id: string;
+  quantity: string;
+  price: string;
+  /** Which observed field the price came from — MARKET_ASK, MARKET_BID, LAST_TRADE. */
+  price_basis: string;
+  filled_at: string;
+  reference_price: string | null;
+  reference_basis: string | null;
+  /** Null when no reference was captured. Slippage against nothing is not a measurement. */
+  slippage_against_reference: string | null;
+  /** The exchange timestamp of the quote this fill was decided against. */
+  quote_exchange_timestamp: string | null;
+  cost: { total: string; modelled: boolean; components: { name: string; amount: string }[] };
+  flags: string[];
+}
+
+export interface Rejection {
+  reason: string;
+  detail: string;
+  observed: Record<string, unknown>;
+}
+
+export interface Order {
+  id: string;
+  account_id: string;
+  instrument_id: string;
+  client_order_id: string;
+  side: "BUY" | "SELL";
+  quantity: string;
+  order_type: "MARKET" | "LIMIT";
+  time_in_force: string;
+  status: OrderStatus;
+  venue: "PAPER" | "LIVE";
+  broker: string;
+  limit_price: string | null;
+  broker_order_id: string | null;
+  filled_quantity: string;
+  remaining_quantity: string;
+  average_fill_price: string | null;
+  fees: string;
+  decision_price: string | null;
+  slippage_against_decision: string | null;
+  created_at: string;
+  closed_at: string | null;
+  rejection: Rejection | null;
+  strategy_tag: string | null;
+  fills: OrderFill[];
+}
+
+export interface GateCheck {
+  name: string;
+  passed: boolean;
+  /** True when there was no limit to check against. */
+  not_configured: boolean;
+  detail: string;
+  observed: Record<string, unknown>;
+}
+
+export interface GateDecision {
+  allowed: boolean;
+  checks: GateCheck[];
+  rejection: Rejection | null;
+  /** Positions that could not be valued, so they are excluded from the exposure
+   * checks. Named rather than treated as flat. */
+  unpriced: string[];
+  multipliers_assumed: string[];
+}
+
+export interface SubmissionOutcome {
+  order: Order;
+  gate: GateDecision;
+  /** True when the client_order_id already existed and nothing new was placed. */
+  replayed: boolean;
+}
+
+export interface TradingPosition {
+  instrument_id: string;
+  symbol: string | null;
+  quantity: string;
+  average_price: string;
+  realised_pnl: string;
+  fees_paid: string;
+  mark_price: string | null;
+  mark_basis: string | null;
+  mark_age_seconds: number | null;
+  market_value: string | null;
+  /** Null when there is no mark. Not zero: an unmarked position is not worthless. */
+  unrealised_pnl: string | null;
+}
+
+export interface AccountPnl {
+  account_id: string;
+  as_of: string;
+  cash: string;
+  opening_cash: string;
+  realised_pnl: string;
+  fees_paid: string;
+  unrealised_pnl: string | null;
+  market_value: string | null;
+  /** Null when any held position has no mark. A total that omits one is not a total. */
+  equity: string | null;
+  total_pnl: string | null;
+  costs_modelled: boolean;
+  gross_of_costs: boolean;
+  positions: TradingPosition[];
+  unpriced: string[];
+}
+
+export interface RequiredTrade {
+  instrument_id: string;
+  symbol: string | null;
+  current_quantity: string;
+  target_quantity: string;
+  trade_quantity: string;
+  side: "BUY" | "SELL";
+  mark_price: string | null;
+  estimated_notional: string | null;
+  rounding_residual: string;
+}
+
+export interface RebalancePlan {
+  account_id: string;
+  as_of: string;
+  equity: string | null;
+  trades: RequiredTrade[];
+  unpriced: string[];
+  notes: string[];
+}
+
+export interface AuditEvent {
+  id: string;
+  order_id: string | null;
+  event_type: string;
+  occurred_at: string;
+  from_status: string | null;
+  to_status: string | null;
+  detail: string | null;
+  payload: Record<string, unknown>;
+}

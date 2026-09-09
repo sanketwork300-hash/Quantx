@@ -19,6 +19,9 @@ EXPECTED_TABLES = {
     "users",
     "audit_logs",
     "broker_connections",
+    "warehouse_datasets",
+    "warehouse_partitions",
+    "research_experiments",
     "instruments",
     "instrument_aliases",
     "uploads",
@@ -134,9 +137,11 @@ class TestMigrations:
         import domains.market_data.orm  # noqa: F401
         import domains.portfolio.orm  # noqa: F401
         import domains.reports.orm  # noqa: F401
+        import domains.research.orm  # noqa: F401
         import domains.risk.orm  # noqa: F401
         import domains.scenarios.orm  # noqa: F401
         import domains.users.orm  # noqa: F401
+        import domains.warehouse.orm  # noqa: F401
         from infrastructure.database.base import Base
 
         engine = create_engine(_sync_url(database_path))

@@ -41,18 +41,26 @@ def _load_builtin_handlers() -> None:
     # compile-time dependencies on the domains it executes work for.
     from domains.derivatives.advanced_jobs import register_handlers as register_advanced
     from domains.derivatives.jobs import register_handlers as register_derivatives
+    from domains.derivatives.live_jobs import register_handlers as register_live_options
     from domains.derivatives.surface_jobs import register_handlers as register_surface
     from domains.execution.jobs import register_handlers as register_execution
+    from domains.execution.oms.jobs import register_handlers as register_trading
     from domains.market_data.jobs import register_handlers as register_market_data
     from domains.microstructure.jobs import register_handlers as register_microstructure
     from domains.portfolio.jobs import register_handlers as register_portfolio
+    from domains.research.jobs import register_handlers as register_research
     from domains.risk.jobs import register_handlers as register_risk
+    from domains.warehouse.jobs import register_handlers as register_warehouse
 
+    register_trading()
     register_market_data()
     register_derivatives()
+    register_live_options()
     register_surface()
     register_portfolio()
     register_risk()
     register_execution()
     register_advanced()
     register_microstructure()
+    register_warehouse()
+    register_research()

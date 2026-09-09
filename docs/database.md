@@ -782,6 +782,52 @@ provider that declares no lifetime must not have one recorded for it —
 the correct behaviour for a credential: it should not outlive the account it
 belongs to.
 
+### `warehouse_datasets` and `warehouse_partitions` — the registry, not the data
+
+```
++---------------------------+          +----------------------------+
+|    warehouse_datasets     |          |   warehouse_partitions     |
++---------------------------+          +----------------------------+
+| id (PK)                   |<---------| dataset_id (FK)            |
+| user_id (FK -> users)     |          | instrument_id (FK)         |
+| name, layer, kind         |          | exchange, day              |
+| exchange, status          |          | object_key                 |
+| source, dataset_digest    |          | rows, rows_flagged         |
+| corporate_action_treatment|          | bytes_written              |
+| continuous                |          | first/last_observation     |
+| rows_in / written /       |          +----------------------------+
+|   excluded / rejected     |    UQ(dataset_id, object_key)
+| rows_flagged              |
+| instrument/partition count|
+| five quality scores       |
+| quality_evidence JSONB    |
+| validation_summary JSONB  |
+| findings_key              |
+| provenance JSONB          |
++---------------------------+
+   CHECK: rows_in = rows_written + rows_excluded + rows_rejected
+```
+
+The rows themselves are Parquet in the object store. These two tables are the
+record of them — which datasets exist, what they cover, how good they are and
+where the files are — which is user-activity sized and transactional in a way a
+tick tape is not.
+
+`freshness_score` is nullable on purpose: not measurable for an archive, which is
+a different statement from zero. The conservation CHECK is the same one option
+chain snapshots carry, for the same reason: a registry row claiming more rows
+than it accounted for is a bug, and the database is the last place that can still
+say so.
+
+### `research_experiments` — a claim, and what supports it
+
+A backtest whose dataset, window, parameters, cost schedule and code version are
+not recorded is an anecdote. Every one of those is a column, and the equity curve
+and fills live in the object store because they grow with the run's length.
+
+`gross_of_costs` is a column rather than something to infer: it changes what
+every neighbouring number means.
+
 ## 3. Indexing
 
 | Table | Index | Purpose |
@@ -794,6 +840,9 @@ belongs to.
 | `option_chain_snapshots` | `(underlying_id, as_of_timestamp DESC)` | history |
 | `jobs` | `(user_id, status, created_at DESC)` | polling |
 | `audit_logs` | `(user_id, created_at DESC)` | review |
+| `warehouse_datasets` | `(user_id, created_at DESC)`, `(layer, kind, exchange)` | listing and scoping |
+| `research_experiments` | `(user_id, created_at DESC)`, `(strategy_name, instrument_id)` | listing, and comparing one strategy across instruments |
+| `warehouse_partitions` | `(dataset_id)`, `(instrument_id, day)` | partition listing, and finding an instrument's history across datasets |
 | `broker_connections` | `UQ(user_id, provider)`, index `(provider, status)` | one credential per user per provider; the index answers "which connections need re-authorization" |
 
 ## 4. TimescaleDB usage
@@ -814,7 +863,13 @@ quote per instrument is written at tick rate and lives in Redis under
 stops being refreshed disappears rather than being served indefinitely as
 though the feed were still running. The live path adds no table at all: it
 reuses `instruments` and `instrument_aliases`, which is what the alias table
-was built for. Those live in the object store as Parquet with a
+was built for.
+
+Nor the **historical warehouse's rows**: bars, trades and quotes live as
+Hive-partitioned Parquet under `warehouse/`, and only the registry —
+`warehouse_datasets` and `warehouse_partitions` — is relational. That is the
+same line, drawn once more: a tick tape grows with market activity, and "which
+datasets exist and how good are they" grows with user activity. Those live in the object store as Parquet with a
 metadata row in Postgres holding the key, schema version, row count and digest.
 
 The rule of thumb used here: if a dataset grows with market activity rather than
@@ -837,3 +892,39 @@ worth recording:
 The complete per-row rejection list goes there too, for the same reason: it is
 unbounded, and truncating it into a column would truncate exactly the thing that
 makes "every rejected row names its source row number and reason" checkable.
+
+
+## Trading tables (Phases 6 and 7)
+
+`trading_accounts`, `trading_positions`, `trading_orders`,
+`trading_order_fills`, `trading_order_events`.
+
+Three constraints here are statements about what the data means rather than
+defensive programming.
+
+`filled_quantity <= quantity` — an order cannot fill more than it asked for.
+
+`(status <> 'REJECTED') or (rejection_reason is not null)` — a refused order
+always carries the reason it was refused, so "why did this not trade" is
+answerable from the row rather than from a log.
+
+`(kill_switch_engaged_at is null) = (kill_switch_reason is null)` — a halted
+account always carries the reason it was halted, written in the same statement
+that halted it. There is no window in which trading is stopped and nothing
+records why.
+
+**A dialect trap worth knowing about.** `DecimalType` is NUMERIC on Postgres and
+TEXT elsewhere, so a CHECK written as `filled_quantity <= quantity` compares two
+*strings* on SQLite, where `'4' <= '10'` is false and `'40' <= '10'` is true —
+the constraint rejects the honest case and admits the impossible one. Every
+decimal comparison in these tables casts to NUMERIC, which is a no-op on Postgres
+and gives SQLite the numeric affinity it needs, and a test asserts the constraint
+bites on the dialect where it would otherwise invert. Older tables use simpler
+decimal CHECKs against literals (`quantity <> 0`) that happen to be correct as
+string comparisons for the values they see; they are correct by accident rather
+than by construction and are worth a sweep.
+
+`trading_order_events` is append-only and never updated. `venue` is repeated on
+every order rather than only on the account — not redundancy to normalise away,
+but so an order can say for as long as it is kept whether it was real money, even
+if the account it belonged to is later changed.

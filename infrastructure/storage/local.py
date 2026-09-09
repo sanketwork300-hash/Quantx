@@ -23,6 +23,19 @@ class LocalObjectStore(ObjectStore):
             raise ValueError(f"object key escapes the store root: {key!r}")
         return candidate
 
+    def local_path(self, key: str) -> Path:
+        """The filesystem path for a key.
+
+        Exposed so a Parquet reader can be handed real paths and do its own
+        predicate and partition pushdown, rather than being fed bytes this
+        process has already loaded into memory. Only the filesystem-backed store
+        can answer this; callers ask with ``getattr`` and fall back.
+        """
+        return self._path(key)
+
+    def local_root(self) -> Path:
+        return self._root
+
     async def put(
         self, key: str, data: bytes, content_type: str = "application/octet-stream"
     ) -> StoredObject:

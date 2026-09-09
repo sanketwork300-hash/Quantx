@@ -656,3 +656,465 @@ snapshots, which is a model of a book nobody saw. The third is the worst failure
 a market-data system has — plausible numbers from a format nobody checked — so
 the protobuf decoder loads a module generated from the provider's own `.proto`
 and refuses to start without one.
+
+## Real-time Phase 2 — Live options intelligence  `[x]`
+
+A live option chain reaching the volatility machinery that was already built,
+plus the two analytics that were not.
+
+The phase deliberately adds no second IV solver, no second SVI fit and no
+live-specific surface path. It adds the route in — a live chain captured as a
+stored snapshot — and then the existing Phase 1, 2, 3 and 9 machinery runs on it
+unchanged.
+
+- [x] `LiveChainCaptureService`: live cache → `option_chain_snapshots`, with
+      conservation and quality scored against the chain rather than carried
+      over from the feed
+- [x] `MarketDataService.capture_live_chain`, so no other domain reaches into
+      market data's repository to write a snapshot
+- [x] `ANALYSE_LIVE_CHAIN`: capture → implied volatilities → SVI → delta skew as
+      one job against one captured moment
+- [x] `quant/volatility/delta_skew.py`: forward-delta strike solving, risk
+      reversal and butterfly
+- [x] `domains/derivatives/delta_skew.py`: the same across a stored surface,
+      recomputed on read rather than stored
+- [x] `domains/derivatives/chain_greeks.py`: delta, gamma, vega, theta and rho
+      for every solved contract, against its own implied volatility
+- [x] `domains/market_data/open_interest.py`: open interest, volume, put-call
+      ratios, turnover, and change between two snapshots
+- [x] `/live/options/analyse`, `/derivatives/surfaces/{id}/delta-skew`,
+      `/market/open-interest/{underlying}` and `/change`
+- [x] UI: the live options page — capture summary, skew term structure, open
+      interest by expiry
+
+**Acceptance — verified**
+
+The phase's own criterion — *user selects NIFTY → live option chain → IV →
+volatility surface → surface analytics* — is
+`tests/integration/test_live_options.py::TestFromLiveChainToSurface`, run end to
+end through the real capture, the real IV solver, the real SVI calibration and
+the real skew, with the live quotes supplied by the seeded synthetic market so
+the surface fitted back out can be checked against the one that went in.
+
+| Criterion | Where |
+| --- | --- |
+| A live chain becomes a stored snapshot | `test_the_capture_becomes_a_stored_snapshot` |
+| **Every contract is kept, excluded or rejected** | `test_every_contract_is_kept_excluded_or_rejected`; `test_a_contract_with_no_live_price_is_rejected_not_omitted` — an untraded wing is rejected *with that reason*, not dropped |
+| How much of an instant the snapshot is gets reported | `test_how_much_of_an_instant_the_snapshot_is_gets_reported` — every calibration downstream treats these quotes as simultaneous |
+| Implied volatilities are solved from the live chain | `test_implied_volatilities_are_solved_from_the_live_chain` |
+| A surface is calibrated and stored | `test_a_surface_is_calibrated_and_stored` |
+| **The recovered surface matches the market it came from** | `test_the_skew_has_the_sign_the_generated_market_was_given` — the synthetic market is built with a negative SVI rho, so the fitted 25Δ risk reversal must come back negative; a sign error here would be invisible in every other test |
+| Every stage names the identifier the next one used | `test_every_stage_names_the_identifier_the_next_one_used` — which is what makes a surface traceable back to its quotes |
+| **The delta convention is on every result** | `tests/unit/test_delta_skew.py::test_every_result_names_the_convention_it_used` — spot and premium-adjusted delta give different strikes for the same nominal delta |
+| The solved strike really has that delta | `test_the_solved_strike_really_has_that_delta` |
+| A strike outside the fitted range is flagged, not hidden | `test_a_strike_outside_the_fitted_range_is_flagged_not_hidden` |
+| **A delta that occurs nowhere is refused, not searched harder for** | `test_a_delta_that_occurs_nowhere_is_reported_not_widened_into` and `test_a_smile_whose_delta_turns_back_on_itself_is_refused` — widening would put a strike far outside the traded market into a skew number |
+| An unmeasurable wing gives null, not zero | `test_an_unmeasurable_wing_gives_null_rather_than_zero`; `test_an_unmeasurable_wing_is_listed_rather_than_dropped` |
+| A slice with no fit is listed, not dropped | `test_a_slice_with_no_fit_is_listed_as_unmeasured_not_dropped` — a term structure with a silent hole reads as a smooth curve |
+| Delta skew recomputes identically | `test_recomputing_it_gives_the_same_answer` — which is why it is computed on read rather than stored beside the surface |
+| **An unsolved contract gets no Greeks, not zeros** | `tests/integration/test_live_options.py::test_an_unsolved_contract_is_listed_rather_than_given_zeros` — a zero delta reads as an option carrying no risk, and it plots and sums perfectly |
+| Greeks have the signs their contracts require | `test_a_call_has_positive_delta_and_a_put_negative`, `test_gamma_and_vega_are_never_negative_for_a_long_option` |
+| Greek units are named on the payload | `test_the_units_are_named_on_the_payload` — an unlabelled vega could be per 1.00 of volatility or per volatility point |
+| The carry assumption travels with the Greeks | `test_the_carry_assumption_travels_with_the_answer` — a wrong carry moves every delta |
+| **A missing open-interest figure is not a zero** | `tests/unit/test_open_interest.py::test_a_missing_figure_is_not_counted_as_zero`, with `coverage` saying how much of the chain carried one |
+| A zero denominator gives null, not infinity | `test_a_zero_denominator_gives_none_rather_than_infinity` |
+| The open-interest unit is labelled, not assumed | `test_the_unit_of_an_absolute_total_is_labelled_not_assumed` |
+| Excluded quotes stay out of the sums and are counted | `test_excluded_quotes_stay_out_of_the_sums_and_are_counted` |
+| **A change carries the window it happened over** | `test_the_window_travels_with_the_change`; `test_a_change_needs_two_snapshots_and_says_so` |
+| Contracts are matched on identity, not on strike and date | `test_contracts_are_matched_on_identity_not_on_strike_and_date` |
+| Contracts in only one snapshot are counted, not dropped | `test_contracts_in_only_one_snapshot_are_counted_not_dropped` |
+| **No open-interest response interprets itself** | `test_the_ratio_is_reported_without_being_interpreted` — the whole response body is scanned for the words a reading would use |
+
+**What is deliberately not here**: "max pain", a second surface model fitted to
+live data, streaming per-tick surface updates, and Greeks taken against the
+fitted surface alongside the quoted ones. Max pain
+is a well-defined function of open interest that is almost always presented as a
+prediction of where the underlying will settle; the platform has no basis for
+that claim and will not imply one by shipping the quantity under its usual name.
+SSVI, Heston, local volatility and the risk-neutral density already run on a
+stored analysis, which is exactly what a live capture produces — they needed no
+live-specific path. Refitting SVI per tick would spend seconds of optimiser time
+to move the fifth decimal place and would make "the surface at 09:31:04" a
+question with no answer. And surface Greeks are a genuinely different quantity
+from quoted-vol Greeks: shipping both undistinguished would give a table where
+neighbouring strikes were measured against different things.
+
+## Real-time Phase 3 — Historical warehouse  `[x]`
+
+Partitioned Parquet in the object store, a dataset registry in PostgreSQL, a
+validator that reports and never repairs, and DuckDB over the top.
+
+- [x] `domains/warehouse/partitioning.py`: Hive-style
+      `exchange/year/month/day/instrument`, round-tripping through the path so a
+      file found on its own is still identifiable
+- [x] `schemas.py`: Arrow schemas with exact decimal prices, UTC microsecond
+      timestamps, and a `flags` column carrying the validator's judgement
+- [x] `validation.py`: schema, timestamps, duplicates, ordering, robust
+      outliers, split-like jumps, and gaps split by whether they are shared
+- [x] `quality.py`: five dimensions and a weighted geometric mean, with an
+      unmeasurable dimension returning `None` rather than zero
+- [x] `storage.py` and `query.py`: whole-partition writes, and two read paths
+      that say which one ran
+- [x] `warehouse_datasets` / `warehouse_partitions` with a conservation CHECK
+- [x] `readers.py`: CSV and Parquet through one coercion path, symbols resolved
+      against the instrument master
+- [x] `INGEST_HISTORICAL_DATASET`, `/warehouse/*`, and the datasets UI
+
+**Acceptance — verified**
+
+The phase's own criterion — *historical dataset → validated → queryable → usable
+by the research engine* — is `tests/integration/test_warehouse.py`, end to end
+from an uploaded file to a time-ordered series read back out of the partitions.
+
+| Criterion | Where |
+| --- | --- |
+| A historical file becomes a registered dataset | `test_a_csv_becomes_a_registered_dataset` |
+| CSV and Parquet read the same way | `test_a_parquet_file_reads_the_same_way` — one coercion path, so the two formats cannot come to disagree about what a column means |
+| **Every row in the file is accounted for** | `test_every_row_in_the_file_is_accounted_for` — the reader's accounting and the warehouse's, and between them every row is written, refused, unparseable or unresolvable |
+| **Suspicious rows are flagged and kept** | `tests/unit/test_warehouse_validation.py::test_a_bad_tick_is_flagged_and_kept`; `tests/unit/test_warehouse_storage.py::test_flags_travel_into_the_partition`; `test_flagged_rows_are_returned_unless_the_caller_excludes_them` |
+| **A naive timestamp is refused, not read as UTC** | `test_a_file_with_no_offset_is_refused_rather_than_read_as_utc` — a year of NSE bars read as UTC is a year shifted by five and a half hours; `test_an_offset_is_honoured_rather_than_overwritten` pins the other side |
+| A duplicate is excluded, a malformed row rejected | `test_a_duplicate_is_excluded_rather_than_rejected`, `test_a_rejection_names_its_row_and_its_reason` |
+| **A split-like jump is detected and never repaired** | `test_a_five_for_one_split_is_recognised`, `test_the_split_is_reported_and_never_repaired` — the post-split rows still hold the unadjusted prices the file gave |
+| A source declaring itself adjusted is not second-guessed | `test_a_source_declaring_itself_adjusted_is_not_second_guessed` |
+| An undeclared treatment is itself a warning | `test_an_undeclared_treatment_is_a_warning_in_itself`, `test_an_undeclared_corporate_action_treatment_is_warned_about` |
+| **A quarantined dataset is not served** | `test_a_quarantined_dataset_is_not_served`, and `test_the_partitions_are_still_written_and_listed` — quarantine refuses to serve, it does not destroy |
+| A gap shared by every instrument is not called a holiday | `test_a_date_missing_for_every_instrument_looks_like_a_closure` — the platform holds no trading calendar and says so |
+| A gap in one instrument alone looks like missing data | `test_a_date_missing_for_one_instrument_looks_like_missing_data` |
+| **A robust score is not fooled by the point it is judging** | `test_the_robust_score_is_not_fooled_by_the_point_it_is_judging`, and `test_a_spike_in_a_barely_moving_series_is_still_found` for the zero-MAD case |
+| Freshness is not measurable for an archive | `test_freshness_is_not_measurable_for_an_archive` — a zero would rank every archive as broken |
+| One ruined dimension drives the overall down | `test_one_ruined_dimension_drives_the_overall_down` |
+| **A partition key round-trips through its path** | `test_a_key_round_trips_through_its_path`; `test_the_day_is_utc_whatever_zone_the_timestamp_carried` |
+| A date range reads only the days it needs | `test_a_date_range_reads_only_the_days_it_needs` — `partitions_read` counts files that contributed rows, so a broken prune fails a test rather than merely being slow |
+| Re-ingesting a day replaces rather than appends | `test_rewriting_a_day_replaces_rather_than_appends` |
+| Prices survive as exact decimals | `test_prices_survive_as_decimals`, `test_prices_come_back_exact_rather_than_through_a_float` |
+| A truncated answer says so | `test_a_truncated_answer_says_so` |
+| A symbol resolving to nothing is reported, not guessed | `test_a_symbol_that_resolves_to_nothing_is_reported_not_guessed` — a bar filed under the wrong instrument is a series that looks reasonable and is somebody else's |
+| A file missing a column fails as a read | `test_a_file_missing_a_required_column_fails_as_a_read` — rather than registering an empty dataset, which would look like a file with no rows |
+| The full finding list is retrievable | `test_the_findings_are_retrievable_in_full` |
+| **A research caller gets a usable series** | `test_the_warehouse_is_readable_by_a_research_caller` — one instrument, a window, chosen columns, in time order |
+
+**What is deliberately not here**: corporate-action adjustment, a trading
+calendar, automatic outlier removal, and partition compaction. Detection without
+a corporate-action feed is honest; correction without one is invention. Gaps are
+reported as shared or not, which is derivable from the data; naming holidays is
+not. Outlier removal takes a judgement — whether a 30% day is a bad tick or the
+most interesting row in the sample — that belongs to whoever is modelling.
+Compaction is real work with real failure modes and needs a workload to be
+designed against rather than guessed at.
+
+**One change outside the phase.** `submit_job` in eager mode no longer re-raises
+a handler's exception. In queue mode the exception reaches a worker and the
+submitting request returned its 202 long before; eager mode has to behave the
+same way, or a failing job turns a submission into a 500 and the client never
+learns the job id it would use to read the failure. `run_job` records `FAILED`
+with the traceback either way, and the job row is the authoritative record.
+
+## Real-time Phase 4 — Research and backtesting  `[x]`
+
+Features that cannot see the future, strategies that produce target weights
+rather than instructions, an event-driven engine, metrics that state their own
+conventions, an attribution that has to close, and a record of every run.
+
+- [x] `domains/research/features.py`: point-in-time by construction, with the
+      look-ahead guarantee expressed as a property test rather than a comment
+- [x] `strategies.py`: the four benchmarks build spec §44 asks for, each
+      declaring the features it needs
+- [x] `costs.py`: a supplied fee schedule with four bases, caps, floors and
+      sides — and `NO_COST_MODEL`, which is a labelled absence rather than zero
+- [x] `engine.py`: decide on bar `t`, fill on bar `t+1`, with position limits,
+      a rebalance threshold and whole-unit fills
+- [x] `metrics.py`: the §19 set, with the annualisation factor measured from the
+      data and every uncomputable metric returning `None`
+- [x] `attribution.py`: an identity that closes, with the residual published
+- [x] `research_experiments` and `/research/*`, plus the experiments UI
+
+**Acceptance — verified**
+
+The phase's own criterion — *dataset → strategy → backtest → performance report*
+— is `tests/integration/test_research.py`, run against a real warehouse dataset
+loaded through the real Phase 3 ingestion path.
+
+| Criterion | Where |
+| --- | --- |
+| A strategy runs over a warehouse dataset | `test_a_strategy_runs_over_a_warehouse_dataset` |
+| The report carries the metrics it promises | `test_the_report_carries_the_metrics_it_promises` |
+| **The attribution reconciles** | `test_the_attribution_reconciles`; `tests/unit/test_backtest.py::test_the_identity_closes` — an attribution that does not add up is a bug, not an approximation |
+| **Buy-and-hold matches the instrument** | `test_its_return_matches_the_instrument_over_the_held_window` — the accounting benchmark, checked against an independently computed final equity rather than by asking the engine twice |
+| **No feature can see the future** | `tests/unit/test_features.py::test_truncating_the_series_does_not_change_past_values` — a property test, parameterised over every feature shipped |
+| A decision is filled on the next bar | `test_a_decision_is_filled_on_the_next_bar`, `test_the_fill_price_is_never_the_bar_the_decision_used` |
+| A signal on the final bar is not executed | `test_a_signal_on_the_final_bar_is_recorded_and_not_executed` — filling it would be a free trade at a price the decision already saw |
+| A feature is `None` until it has its window | `test_a_feature_is_none_until_it_has_its_window` — a 20-day mean of three days is not a 20-day mean |
+| **No cost schedule means gross, and says so** | `test_no_schedule_means_gross_and_says_so`, `test_a_run_with_no_cost_schedule_is_gross_and_says_so` — silently assuming free trading is the commonest way a backtest reports returns that do not exist |
+| A supplied schedule is charged and reduces the return | `test_a_supplied_schedule_is_charged_and_leaves_the_book`, `test_costs_reduce_the_return` |
+| A sell-only levy is not charged on a buy | `test_a_sell_only_component_is_not_charged_on_a_buy` |
+| A cap binds; a derived component sees only what it applies to | `test_a_cap_binds`, `test_a_derived_component_sees_only_what_it_applies_to` |
+| Slippage always moves against the trader | `test_slippage_always_moves_against_the_trader`, `test_a_buy_pays_more_than_the_reference_price` |
+| **Slippage is reported, not subtracted twice** | `test_slippage_is_reported_but_not_subtracted_twice` — it is already inside the fill prices, and double-counting would be absorbed by the residual |
+| Greeks are absent rather than zero | `test_greeks_are_absent_rather_than_zero` — a zero theta reads as "no time decay", not "not applicable" |
+| **The annualisation factor comes from the timestamps** | `test_the_annualisation_factor_comes_from_the_timestamps` — assuming 252 on a weekly series would be wrong sevenfold |
+| A short window gets no CAGR | `test_a_short_window_gets_no_cagr` — annualising six weeks describes a year nobody observed |
+| A short sample is reported with its count, not withheld | `test_a_short_sample_is_reported_with_its_count_not_withheld` |
+| A curve that only rose has no Sortino | `test_a_curve_that_only_rises_has_no_sortino` |
+| Crossing through zero opens the new side at the fill price | `test_crossing_through_zero_opens_the_new_side_at_the_fill_price` — anything else leaves an average price mixing a long and a short |
+| A clamped weight is reported | `test_a_weight_beyond_the_limit_is_clamped_and_reported` — a strategy whose weights are cut is not the strategy that was described |
+| A flagged bar is marked but not traded on | `test_a_flagged_bar_is_marked_but_not_traded_on`, and including them is a recorded choice |
+| **The record holds what the run assumed** | `test_the_experiment_record_holds_what_the_run_assumed` — the cost schedule verbatim, the strategy parameters, the features, the code commit and the fill timing |
+| Bad parameters are refused before the job | `test_bad_strategy_parameters_are_refused_before_the_job` |
+| A run with no bars fails rather than reporting nothing | `test_a_run_with_no_bars_fails_rather_than_reporting_nothing` |
+
+**What is deliberately not here**: multi-instrument portfolios, parameter sweeps,
+walk-forward validation, and anything that evaluates a strategy against *today's*
+market. The first is Phase 5 and doing it badly here would have to be undone
+there. The second is how a backtest becomes a story about noise, and when it
+arrives it needs a multiple-testing correction alongside it rather than after it.
+The last is the point at which a research tool would become a recommendation
+engine, and the platform's language policy forbids that: a strategy here produces
+a **target weight for a simulated book**, and the type is `LONG`/`SHORT`/`FLAT`
+describing a state rather than `BUY`/`SELL` instructing anybody.
+
+## Real-time Phase 5 — Portfolio construction  `[x]`
+
+Five objectives, Black-Litterman, CVaR, and a constraint set that names its own
+contradictions.
+
+- [x] `quant/portfolio/constraints.py`: budget, bounds, gross, net, group and
+      turnover limits, with a feasibility pre-check that reports *which*
+      constraints contradict
+- [x] `quant/portfolio/optimisation.py`: minimum variance, maximum Sharpe,
+      mean-variance, risk parity — multi-start SLSQP, with the starts attempted
+      and converged both reported
+- [x] `quant/portfolio/black_litterman.py`: equilibrium returns from a supplied
+      prior, blended with views carrying their own uncertainty
+- [x] `quant/portfolio/cvar.py`: the Rockafellar-Uryasev linear program, with
+      gross and turnover limits carried as auxiliary variables
+- [x] Ledoit-Wolf shrinkage in `quant/statistics/covariance.py`, requested by
+      name and reporting the intensity it chose
+- [x] `domains/portfolio/optimisation.py` and `/portfolio-optimisation/target`,
+      plus the construction UI
+
+**Acceptance — verified**
+
+The phase's own criterion — *signals → optimiser → target portfolio → risk
+metrics* — is `tests/integration/test_portfolio_optimisation.py`, with the
+covariance estimated from a real warehouse dataset loaded through the Phase 3
+path.
+
+| Criterion | Where |
+| --- | --- |
+| A target portfolio comes back, respecting budget and sign | `test_a_minimum_variance_portfolio_comes_back` |
+| **The risk of that portfolio is reported beside it** | `test_the_risk_of_the_portfolio_is_reported_beside_it` — volatility, historical VaR and expected shortfall, effective assets, and the observation count |
+| Risk contributions are reported per holding | `test_risk_contributions_are_reported_per_holding` — a holding with 5% of the weight and 40% of the risk is the portfolio's real position |
+| Minimum variance beats every single asset | `tests/unit/test_portfolio_optimisation.py::test_it_beats_every_single_asset` — the claim of diversification, and a check the objective is minimised rather than merely evaluated |
+| Risk parity equalises the contributions | `test_every_asset_contributes_the_same_risk`, `test_risk_parity_equalises_the_contributions` |
+| **A return-seeking objective with no forecast is refused** | `test_a_return_seeking_objective_with_no_forecast_is_refused` — mean-variance maximises the error in its expected returns, so quietly substituting sample means would build a confident portfolio on the worst input |
+| Historical means can be asked for and are warned about | `test_historical_means_can_be_asked_for_and_are_warned_about`, `test_historical_means_are_flagged_wherever_they_are_used` |
+| A supplied forecast is used and named | `test_a_supplied_forecast_is_used_and_named` |
+| **Mean-variance without a risk aversion is refused** | `test_mean_variance_without_a_risk_aversion_is_refused` — it is a statement about a person's tolerance, not a property of the market |
+| Black-Litterman without `tau` is refused | `test_black_litterman_without_tau_is_refused` — no consensus value exists, so the platform will not pick one |
+| A prior with no views gives equilibrium returns | `test_a_prior_with_no_views_gives_equilibrium_returns`, `test_with_no_views_the_posterior_is_the_prior` |
+| A view moves the asset it names, and its neighbours | `test_a_view_moves_the_asset_it_names`, `test_a_view_moves_correlated_assets_too` |
+| A more confident view moves the answer further | `test_a_more_confident_view_moves_the_answer_further` |
+| A view held with certainty is refused | `test_a_view_held_with_certainty_is_refused` — that is a constraint, not a view |
+| The posterior covariance exceeds the prior | `test_the_posterior_covariance_exceeds_the_prior` — estimation uncertainty in the mean adds to the covariance of returns |
+| **Impossible constraints name the contradiction** | `test_impossible_constraints_name_the_contradiction`, `test_a_budget_outside_the_gross_limit_is_named`, `test_a_minimum_above_a_maximum_is_named_per_asset` — "no solution" is useless when six limits are in play |
+| Weight, group and turnover limits bind and are reported | `TestConstraintsBind`, `test_a_maximum_weight_binds_and_is_reported` |
+| A turnover limit without a starting point is refused | `test_a_turnover_limit_without_a_starting_point_is_refused` — turnover from nowhere is not a quantity |
+| **CVaR avoids the risk variance cannot see** | `test_it_avoids_the_asset_variance_cannot_see` — a fat left tail that a covariance rates as ordinary |
+| CVaR is never below VaR | `test_cvar_is_never_below_var` |
+| A thin tail is reported, not averaged over anyway | `test_a_thin_tail_is_reported_rather_than_averaged_over_anyway` — a CVaR from five points is a number, not an estimate |
+| Shrinkage is asked for by name and reported | `test_shrinkage_is_asked_for_by_name`, `test_shrinkage_is_asked_for_and_reported` |
+| Shrinkage improves the conditioning | `test_shrinkage_improves_the_conditioning` — the noise in a sample covariance lands where an optimiser looks for its cleverest trades |
+| Effective assets counts the spread, not the holdings | `test_effective_assets_counts_the_spread_not_the_holdings` |
+| Instruments with no history are reported, not dropped | `test_instruments_with_no_history_are_reported_not_silently_dropped` — a weight of zero and an absent asset are different things |
+
+**What is deliberately not here**: a default risk aversion, market-cap weights,
+and margin or liquidity constraints. The first would be choosing a portfolio on
+the user's behalf. The second is data the platform does not hold. The third and
+fourth are named in the build spec and are genuinely wanted — but margin needs a
+broker's formula, which build spec 1.1 forbids inventing, and liquidity needs
+volume joined to a participation assumption. Each would be wrong if guessed, so
+neither is offered rather than being offered badly.
+
+Also absent: automatic conversion of strategy signals into expected returns. A
+signal says "hold 40% long"; it does not say what return is expected.
+`views_from_signals` exists and **requires** a stated `return_scale` — what a
+full-weight signal is worth — because a platform that picked one would be
+inventing the view rather than translating it.
+
+---
+
+## Real-time Phase 6 — Paper trading  `[x]`
+
+**Acceptance** (build spec §46): *Signal → Risk check → Paper order → Fill →
+Portfolio → P&L*.
+
+The slice is the order lifecycle, end to end, with a broker on the far side of
+an interface rather than a special case in the middle of the service. What makes
+it a phase and not a stub is that the paper broker is the *same interface* the
+live broker implements in Phase 7 — build spec §23 is explicit that paper
+trading must use the same order interface as live trading, and the only way to
+know that is true is to have written the second one against it.
+
+- [x] `BrokerAdapter` — `place_order` / `cancel_order` / `modify_order` /
+      `positions` / `orders` / `account`, with a declared `capabilities` set so
+      an adapter that cannot modify an order says so instead of failing at the
+      call.
+- [x] `PaperBroker` over a **pure** fill engine: `decide_fill(order, quote,
+      policy, as_of)`. Deterministic and independently testable; the adapter
+      only supplies the quote and persists the outcome.
+- [x] Order lifecycle over exactly the six states build spec §25 names — `NEW`,
+      `ACKNOWLEDGED`, `PARTIALLY_FILLED`, `FILLED`, `CANCELLED`, `REJECTED` —
+      with the legal transitions declared as a table and an illegal one raising.
+- [x] `client_order_id` as an idempotency key. A resubmitted id returns the
+      order that already exists rather than placing a second one.
+- [x] Pre-trade risk gate: every check named, every refusal recorded as a
+      `REJECTED` order with its reason. An order is never silently resized.
+- [x] Positions, cash and realised P&L through the **existing** `Book` from
+      `domains/research/models.py`, so the paper account and a backtest of the
+      same fills are computed by one implementation rather than two that agree
+      until they do not.
+- [x] Live risk on the paper account through the existing valuation and
+      exposure engines.
+- [x] `POST /trading/accounts/{id}/rebalance-preview` — the trades required to
+      reach a **stated** target, which is arithmetic on the user's own target
+      and not a recommendation.
+- [x] Frontend: `web/app/trading/`.
+
+**Deliberate refusals, decided before writing the code**
+
+| Question | Answer |
+| --- | --- |
+| What does a paper market order fill at with no two-sided market? | It does not fill. `PaperFillPolicy.QUOTE_ONLY` is the default; filling at the last trade is a different policy that has to be asked for, because a trade print is not a quote — the same rule that makes `Quote.mid_price` return `None`. |
+| What fills when the quote reports no depth? | The full quantity, flagged `DEPTH_NOT_REPORTED`. Asserting a complete fill without a size on the quote is asserting liquidity nobody saw, and the flag is what stops that reading as an observation. |
+| What are the brokerage, STT and GST? | Whatever the user's `CostSchedule` says. There is no default schedule: statutory rates are exchange and régime rules, and build spec 1.1 forbids inventing them. With no schedule the P&L is **gross** and labelled so — `NO_COST_MODEL`, reused from Phase 4. |
+| Is a fill an observation? | No. Every paper fill carries `PAPER_FILL_COUNTERFACTUAL` and the `exchange_timestamp` of the quote it was decided against, so it can never be read back as something the market did. |
+| Does the platform decide what to trade? | No. `rebalance-preview` differences the current book against a target the user supplied. There is no endpoint that produces an order the user did not ask for. |
+
+
+**Evidence**
+
+| Claim | Test |
+| --- | --- |
+| The acceptance path runs end to end | `test_an_order_fills_against_the_live_quote_and_reaches_the_pnl` — an Upstox frame becomes a live quote, an order fills at the ask, and the position and cash reach the P&L |
+| A fill needs a quote to rest on | `test_a_market_order_with_no_offer_does_not_fill` — the rule behind `Quote.mid_price` returning `None`, at the point of execution |
+| Filling at a trade print has to be asked for | `test_the_permissive_policy_has_to_be_chosen_on_the_account`, `test_filling_at_the_last_trade_has_to_be_asked_for` |
+| A stale quote does not fill | `test_a_stale_quote_does_not_fill` — stricter than valuation, deliberately |
+| A full fill with no published depth is flagged | `test_a_full_fill_with_no_published_depth_is_flagged` — asserting a complete fill without a size asserts unseen liquidity |
+| A marketable limit pays the touch | `test_a_marketable_limit_pays_the_touch_not_its_own_limit` — booking at the limit would invent cost the market never charged |
+| A resting order is not a failed one | `test_a_resting_order_is_not_rejected_for_being_unfillable` |
+| The gate refuses rather than resizes | `test_a_position_limit_refuses_rather_than_trims`, `test_an_order_over_the_limit_is_recorded_as_rejected` |
+| Every breach is listed, not only the first | `test_every_breach_is_listed_not_only_the_first` |
+| Checks that could not run say so | `test_every_check_is_reported_even_when_it_passes`, `test_the_band_is_not_applied_without_a_two_sided_quote` |
+| An unmeasured loss limit is not a limit | `test_a_loss_limit_with_no_loss_supplied_refuses` |
+| An unlimited live account is refused | `test_a_live_account_may_not` |
+| The cash check says it is not a margin check | `test_the_cash_check_says_it_is_not_a_margin_check` |
+| The kill switch cancels what is resting | `test_the_kill_switch_halts_the_account_and_cancels_what_rests` — a working order is exposure the switch was pulled to stop |
+| A halt always carries a reason | `test_a_kill_switch_without_a_reason_is_refused`, plus `ck_kill_switch_has_a_reason` |
+| A retried submission is safe | `test_a_repeated_client_order_id_does_not_place_a_second_order` |
+| An unpriced position withholds equity | `test_an_unpriced_position_suppresses_the_equity_figure` |
+| With no schedule the P&L says it is gross | `test_with_no_schedule_the_pnl_says_it_is_gross` |
+| A supplied schedule is charged and recorded | `test_a_supplied_schedule_is_charged_and_travels_into_provenance` — including GST on capped brokerage |
+| **The book is the fills** | `test_replaying_the_fills_reproduces_the_stored_position` — the stored position is a cache, and this is what keeps it honest |
+| The audit trail records the refusal too | `test_a_rejection_records_why_before_anything_else_happens` — and records **no** `BROKER_REQUEST`, which is the evidence nothing was sent |
+| An impossible state change fails loudly | `test_a_terminal_order_goes_nowhere`, `test_a_partially_filled_order_cannot_be_rejected` |
+| Nothing recommends anything | `test_no_response_field_recommends_anything` |
+
+**A dialect bug found while building this.** `DecimalType` is NUMERIC on
+Postgres and TEXT elsewhere, so a CHECK written as `filled_quantity <= quantity`
+compares *strings* on SQLite — where `'4' <= '10'` is false and `'40' <= '10'` is
+true. The constraint would have rejected the honest case and admitted the
+impossible one. Every decimal comparison in the trading tables casts to NUMERIC,
+which is a no-op on Postgres, and
+`test_the_database_refuses_an_order_that_filled_more_than_it_asked` asserts the
+constraint bites on the dialect where it would otherwise invert. Older tables
+have simpler decimal CHECKs (`quantity <> 0`) that are correct by accident rather
+than by construction; they are worth a sweep and are not one.
+
+---
+
+## Real-time Phase 7 — Live trading  `[x]`
+
+**Build spec §46**: *only after paper trading is stable*. `UpstoxBroker`, live
+OMS, execution algorithms, kill switch, risk limits, audit logs, and
+`LIVE_TRADING_ENABLED=false` by default.
+
+Most of this phase was already built, because Phase 6 was built as though this
+one existed. The OMS, the gate, the kill switch and the audit trail are not
+duplicated for live; they are the same code, and the venue is a field. What is
+genuinely new is the second adapter — and writing it was the test of whether
+build spec §23's "same order interface" claim was true. It was: no OMS method
+changed to accommodate it.
+
+- [x] `UpstoxBroker` implementing the same six methods as `PaperBroker`.
+- [x] Live routing in the OMS, with the credential coming from the Phase-0
+      vault per request rather than from the environment.
+- [x] Arming: a per-account act, independent of the deployment flag.
+- [x] Execution algorithms connected to order placement, reusing the existing
+      TWAP/VWAP/POV/liquidity-adaptive schedulers rather than growing a second
+      set.
+- [x] Kill switch and mandatory risk limits — Phase 6, applying here by venue.
+- [x] Audit log — Phase 6, and it now records arming attempts and their refusals.
+
+**Three gates, and why there are three**
+
+| Gate | Question it answers | Where |
+| --- | --- | --- |
+| `live_trading_enabled` | May this *installation* trade real money? | Deployment config, default `false` |
+| `live_armed_at` | Is this *book* meant to be trading right now? | Per account, an explicit act, cleared by the kill switch |
+| `verified_against_documentation` | Has anybody checked this adapter against the broker's published contract? | Per adapter, default `false` |
+
+The first two are the build spec's requirement plus the observation that a
+configuration flag alone is a single point of failure. The third is the one
+this phase added on its own account, and it is the most important.
+
+**Why an unverified adapter cannot place an order.** A wrong field name fails
+loudly — the broker returns an error and somebody fixes it. A wrong *status*
+mapping does not: it tells the platform an order filled when it did not, the
+book is then wrong, and nothing anywhere reports a problem. The endpoints, the
+request field names and the status vocabulary in `UpstoxBroker` were written
+without reading the broker's published contract, and build spec 1.1 forbids
+presenting that as verified. So the adapter is complete, wired and tested
+against recorded payloads, and it refuses to send a live order until a
+deployment that has done the checking sets the flag. A paper account is
+unaffected.
+
+**And an unrecognised status is an error.** `DEFAULT_STATUS_MAP` is deliberately
+not exhaustive-by-guessing. A broker state absent from it raises
+`UnknownBrokerStatus` rather than being rounded to the nearest plausible
+neighbour — "complete" and "cancelled" are both terminal, and treating one as
+the other either loses a position or invents one.
+
+**Evidence**
+
+| Claim | Test |
+| --- | --- |
+| An unverified mapping sends nothing | `test_an_unverified_adapter_will_not_place_a_live_order` — and asserts the transport recorded no call |
+| The shipped default is unverified | `test_the_default_endpoint_set_is_unverified` |
+| An unknown status stops rather than guesses | `test_an_unknown_status_is_an_error_not_a_guess`, `test_the_error_lists_the_states_it_does_know` |
+| An acknowledgement is not read as working | `test_a_placement_acknowledgement_is_not_read_as_working` — an id and nothing else means acknowledged |
+| A completed order with nothing filled is refused | `test_a_completed_order_with_nothing_filled_is_refused` — either the mapping or the payload is wrong |
+| A fill's side comes from the broker's own field | `test_a_sell_is_booked_negative_from_the_brokers_own_field` — a fill on the wrong side inverts a position |
+| The broker's average is named as an average | `test_a_completed_order_produces_a_fill_named_for_what_it_is` — `BROKER_REPORTED_AVERAGE`, not a trade price |
+| Unmapped fields are reported | `test_fields_the_adapter_does_not_map_are_reported` |
+| A 5xx is an unknown outcome | `test_a_server_error_is_an_unknown_outcome_not_a_rejection` |
+| Margin stays attributed to the broker | `test_margin_figures_keep_their_attribution` — no field on the payload is a bare `margin` |
+| Live accounts are created unarmed | `test_a_live_account_is_created_unarmed` |
+| Arming lists every obstacle at once | `test_arming_reports_every_obstacle_at_once` |
+| A paper account cannot be armed | `test_a_paper_account_cannot_be_armed` |
+| An unarmed live order is refused and recorded | `test_an_unarmed_live_order_is_refused_and_recorded` |
+| Nothing reaches a broker while disabled | `test_a_live_order_never_reaches_a_broker_while_disabled` — no `BROKER_REQUEST` in the trail |
+| Disarming is not the kill switch | `test_disarming_is_not_the_kill_switch` — one pauses, the other cancels |
+| Only the open slice is placed | `test_only_the_open_slice_is_placed` |
+| A repeated call places each slice once | `test_calling_it_twice_does_not_place_the_slice_twice` |
+| A closed slice is missed, not placed late | `test_a_closed_slice_is_reported_missed_not_placed_late` |
+| A VWAP without a volume profile is refused | `test_a_vwap_without_a_volume_profile_is_refused` — falling back to TWAP answers a different question under this name |
+| Nothing claims an optimal execution | `test_no_response_here_claims_an_optimal_execution` |
+
+**Deliberately not built**
+
+| Not built | Why |
+| --- | --- |
+| Order modification against the live broker | The modify contract is unconfirmed, and an amendment that silently becomes a no-op leaves an order working at terms nobody chose. `MODIFY` is absent from the capability set, so the OMS refuses the instruction rather than sending it. |
+| Automatic reconciliation of broker positions against the platform's | `get_positions()` returns the broker's view, kept beside ours. Overwriting one with the other destroys the only evidence they ever disagreed, which is the entire reason for asking. |
+| A resubmit-on-timeout retry | A broker that could not be reached leaves the order `NEW` with the failure recorded. Retrying an indefinite outcome is how duplicate orders get sent. |
+| An intraday volume profile | POV and VWAP need one and the platform does not hold one. A forecast invented here would make both produce confident schedules on a number nobody supplied. |

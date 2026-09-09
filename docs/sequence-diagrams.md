@@ -391,3 +391,280 @@ nothing downstream can tell it from a fresh one.
 pricing, surfaces, risk, margin, execution — takes a `MarketState` and cannot
 tell whether it came from a feed or from a file, which is the property that
 makes a live analysis reproducible later.
+
+
+---
+
+## 9. Live chain to volatility surface  **[implemented, real-time Phase 2]**
+
+One job, one captured moment, four stages — and almost every box below already
+existed. What Phase 2 added is the first arrow.
+
+```
+User    API        JobSvc  Worker   LiveStore  Snapshot  IVSolver  SVI    DeltaSkew
+ |       |            |       |         |          |         |       |        |
+ |-pick->|            |       |         |          |         |       |        |
+ |       |--create job|------>|         |          |         |       |        |
+ |<-202 job_id--------|       |         |          |         |       |        |
+ |       |            |       |         |          |         |       |        |
+ |       |            |       |--read chain quotes>|         |       |        |
+ |       |            |       |  score against the chain, not the feed         |
+ |       |            |       |--write snapshot--------------->|      |        |
+ |       |            |       |  input == kept + excluded + rejected           |
+ |       |            |       |         |          |         |       |        |
+ |       |            |       |--analyse(snapshot_id)------------------>|      |
+ |       |            |       |<-implied vols, forwards, per expiry-----|      |
+ |       |            |       |         |          |         |       |        |
+ |       |            |       |--calibrate(analysis_id)------------------->|   |
+ |       |            |       |  + characteristics, + arbitrage reports    |   |
+ |       |            |       |<-surface_id-------------------------------|   |
+ |       |            |       |         |          |         |       |        |
+ |       |            |       |--delta skew off the stored surface------------>|
+ |       |            |       |<-25D / 10D risk reversal, butterfly-----------|
+ |       |            |       |         |          |         |       |        |
+ |--GET /jobs/{id}/result---->|         |          |         |       |        |
+ |<-snapshot_id, analysis_id, surface_id, stages, skew-------|       |        |
+```
+
+Three points the diagram exists to make.
+
+**The snapshot is written before anything is computed.** Not for durability —
+for reproducibility. A surface calibrated from memory cannot be refitted six
+months later to check what it said, and there would be two paths through the IV
+solver that could disagree.
+
+**Quality is scored at capture, not carried over.** The feed scored each quote
+as a standalone observation. An option in a chain is additionally checked
+against its own no-arbitrage bounds and its underlying, and that check needs the
+chain around it.
+
+**Each stage names the identifier the next one used.** `snapshot_id` →
+`analysis_id` → `surface_id`, all in the job result, which is what makes a
+number on the surface traceable back to the individual quote it came from.
+
+
+---
+
+## 10. Historical dataset into the warehouse  **[implemented, real-time Phase 3]**
+
+```
+User    API      JobSvc  Worker   Reader  Validator  ObjectStore  Registry  DuckDB
+ |       |          |       |        |        |           |          |        |
+ |-upload>|         |       |        |        |           |          |        |
+ |       |--create job----->|        |        |           |          |        |
+ |<-202 job_id------|       |        |        |           |          |        |
+ |       |          |       |        |        |           |          |        |
+ |       |          |       |--read (CSV or Parquet)----->|          |        |
+ |       |          |       |<-rows + parse errors--------|          |        |
+ |       |          |       |  symbols resolved, or reported unresolved       |
+ |       |          |       |        |        |           |          |        |
+ |       |          |       |--validate------>|           |          |        |
+ |       |          |       |<-written / excluded / rejected, and flags       |
+ |       |          |       |   rows_in == written + excluded + rejected      |
+ |       |          |       |        |        |           |          |        |
+ |       |          |       |--write partitions (one file per instrument-day)>|
+ |       |          |       |        |        |  exchange=NSE/year=/month=/day=|
+ |       |          |       |        |        |           |          |        |
+ |       |          |       |--register (counts, five quality scores)-------->|
+ |       |          |       |   AVAILABLE, or QUARANTINED if validation errored|
+ |       |          |       |        |        |           |          |        |
+ |--GET /warehouse/query--->|        |        |           |          |        |
+ |       |          quarantined? refuse       |           |          |        |
+ |       |--------------------------------------------------------->|--glob->|
+ |<-rows, read_path, partitions_read, truncated---------------------|         |
+```
+
+Three points.
+
+**The trichotomy conserves, and the flags are a column.** A suspicious row
+reaches its partition carrying what was suspicious about it, so a reader can
+exclude it, weight it down or look at it. A loader that quietly removed bad ticks
+would hand the research engine a clean-looking series and an unexplainable
+backtest.
+
+**Quarantine refuses to serve, it does not destroy.** The partitions are written
+and the findings are stored in full. What is prevented is the one thing that
+matters: serving a series with an unadjusted split in it and hoping the warning
+is read.
+
+**The partition layout is the query plan.** `exchange=`/`year=`/`month=`/`day=`
+are columns to DuckDB, so a week's query reads a week's files — and
+`partitions_read` on the response counts the files that actually contributed
+rows, so a broken prune is visible rather than merely slow.
+
+
+---
+
+## 11. Dataset to performance report  **[implemented, real-time Phase 4]**
+
+```
+User    API    JobSvc  Worker  Warehouse  Features  Strategy  Engine  Metrics  Record
+ |       |        |       |        |          |         |        |       |        |
+ |-run-->|        |       |        |          |         |        |       |        |
+ |       |--create job--->|        |          |         |        |       |        |
+ |<-202 job_id----|       |        |          |         |        |       |        |
+ |       |        |       |        |          |         |        |       |        |
+ |       |        |       |--query bars------>|         |        |       |        |
+ |       |        |       |  refuses a quarantined dataset       |       |        |
+ |       |        |       |<-rows + validator flags--|          |       |        |
+ |       |        |       |        |          |         |        |       |        |
+ |       |        |       |--compute (bars 0..i only)->|        |       |        |
+ |       |        |       |        |          |         |        |       |        |
+ |       |        |       |     for each bar t:        |        |       |        |
+ |       |        |       |       features at t ------>|        |       |        |
+ |       |        |       |       <- target weight ----|        |       |        |
+ |       |        |       |       fill against bar t+1 --------->|      |        |
+ |       |        |       |       book updated, equity marked    |      |        |
+ |       |        |       |        |          |         |        |       |        |
+ |       |        |       |--equity curve------------------------------>|        |
+ |       |        |       |<-metrics, with the conventions attached-----|        |
+ |       |        |       |--attribute (identity must close)            |        |
+ |       |        |       |        |          |         |        |       |        |
+ |       |        |       |--record strategy, params, features, costs, commit--->|
+ |       |        |       |  curve and fills to the object store               |
+ |       |        |       |        |          |         |        |       |        |
+ |--GET /research/experiments/{id}--------------------------------------------->|
+ |<-the claim, and everything that supports it---------------------------------|
+```
+
+Three points.
+
+**The loop's shape is the anti-look-ahead argument.** Features at bar `t` see
+bars `0..t`; the fill is against bar `t+1`. A decision that used bar `t`'s close
+cannot be filled at it, so the engine offers no option to.
+
+**Costs enter as data, not as a default.** The schedule comes from the request
+and is recorded verbatim. Without one the run is gross, and every figure it
+produces says so.
+
+**The record is the deliverable.** A backtest number without the dataset, the
+parameters, the cost schedule and the code commit is an anecdote; the last arrow
+is what makes it a claim somebody else could check.
+
+
+---
+
+## 12. History to target portfolio  **[implemented, real-time Phase 5]**
+
+```
+User    API   Optimiser  Warehouse  Covariance  Forecast  Solver  Risk
+ |       |        |          |          |          |        |      |
+ |-post->|        |          |          |          |        |      |
+ |       |------->|          |          |          |        |      |
+ |       |        |--bars per instrument-->|       |        |      |
+ |       |        |<-aligned returns (inner join on timestamp)     |
+ |       |        |   an instrument with no overlap is DROPPED and reported
+ |       |        |          |          |          |        |      |
+ |       |        |--estimate----------->|         |        |      |
+ |       |        |<-covariance + shrinkage intensity if asked     |
+ |       |        |          |          |          |        |      |
+ |       |        |--what is the forecast?-------->|        |      |
+ |       |        |   supplied / Black-Litterman / historical, or REFUSE
+ |       |        |          |          |          |        |      |
+ |       |        |--feasibility pre-check                  |      |
+ |       |        |   contradictions named together, not one at a time
+ |       |        |--solve (multi-start SLSQP, or LP for CVaR)---->|
+ |       |        |<-weights, starts attempted and converged------|
+ |       |        |          |          |          |        |      |
+ |       |        |--risk of the portfolio that came back-------------->|
+ |       |        |<-volatility, historical VaR/ES, effective assets----|
+ |<-target portfolio + its risk + what shaped it--|         |      |
+```
+
+Three points.
+
+**The forecast is a decision, not a step.** A return-seeking objective with
+nothing supplied is refused rather than given sample means. Mean-variance
+maximises the error in its expected returns, so substituting a poor forecast
+quietly produces a confident portfolio built on the worst available input.
+
+**Alignment drops rather than fills.** An instrument whose history does not
+overlap the others is reported, not forward-filled: a filled return is an
+invented observation, and a covariance estimated from invented observations
+understates every correlation it touches.
+
+**The risk reported is the risk of the portfolio that came back**, not of the one
+that was asked for — including the risk contributions, which routinely disagree
+with the weights about where the portfolio's real bet is.
+
+
+---
+
+## 13. Signal to P&L  **[implemented, real-time Phase 6]**
+
+```
+User    API    Gate    Broker   FillEngine   Book     Audit
+ |       |       |        |          |         |        |
+ |-order>|       |        |          |         |        |
+ |       |--is this allowed?         |         |        |
+ |       |<-decision + EVERY check, passed or not------->|
+ |       |   a refusal is an ORDER ROW with a reason on it, not a 4xx
+ |       |       |        |          |         |        |
+ |       |--can this adapter do this?|         |        |
+ |       |   an instruction it cannot carry out is refused, not translated
+ |       |       |        |          |         |        |
+ |       |--place-------->|          |         |        |
+ |       |       |        |--quote + order---->|        |
+ |       |       |        |<-fill / rest / refuse, with a reason
+ |       |       |        |          |         |        |
+ |       |--book the fill------------------->|          |
+ |       |   average cost, the SAME code a backtest uses
+ |       |       |        |          |         |        |
+ |       |--every step---------------------------------->|
+ |<-order + gate + fills, each flagged with what it rested on
+```
+
+Three points.
+
+**The gate comes back whether or not it refused.** A user whose order passed
+still wants to know which limits were checked and which were *not configured*,
+and an interface that shows its checks only on failure teaches people that
+silence means safety.
+
+**A refusal is a `201`.** The order row exists with its reason on it. Answering a
+refusal with an error and no record leaves the user unable to see what the gate
+objected to.
+
+**The fill's evidence travels with it forever.** `price_basis` says which
+observed field the price came from, `quote_exchange_timestamp` says which quote
+it was decided against, and `PAPER_FILL_COUNTERFACTUAL` says nobody was on the
+other side. There is no query that turns a paper fill into something the market
+did.
+
+---
+
+## 14. A live order, and the three gates  **[implemented, real-time Phase 7]**
+
+```
+User    API   Deployment  Account  Adapter   Vault   Broker
+ |       |        |          |        |        |       |
+ |-order>|        |          |        |        |       |
+ |       |--pre-trade gate (as above; limits are MANDATORY on live)
+ |       |        |          |        |        |       |
+ |       |--live_trading_enabled?     |        |       |
+ |       |   "may this installation trade real money" — default NO
+ |       |        |          |        |        |       |
+ |       |--live_armed_at?--->        |        |       |
+ |       |   "is this book meant to be trading now" — a separate act
+ |       |        |          |        |        |       |
+ |       |--verified_against_documentation?--->|       |
+ |       |   "has anybody checked this mapping" — default NO
+ |       |        |          |        |        |       |
+ |       |--token------------------------------>       |
+ |       |   fetched per request and renewed by the vault; never an env var
+ |       |        |          |        |--place-------->|
+ |       |        |          |        |<-payload-------|
+ |       |   status not in the map -> RAISE, never round to a neighbour
+ |<-order, or a rejection recorded with which gate refused it
+```
+
+The three gates are independent on purpose. A configuration flag alone is a
+single point of failure; an armed account on a disabled deployment is a
+mistake caught rather than an order sent.
+
+The third gate is the one that is easy to leave out. A wrong field name in an
+adapter fails loudly — the broker returns an error and somebody fixes it. A
+wrong *status* mapping does not: it tells the platform an order filled when it
+did not, the book is then wrong, and nothing anywhere reports a problem. So the
+adapter refuses to place a live order until a deployment that has read the
+broker's contract says the mapping has been checked.

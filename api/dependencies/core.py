@@ -14,6 +14,7 @@ from domains.broker_auth.service import BrokerAuthService
 from domains.derivatives.advanced import AdvancedDerivativesService
 from domains.derivatives.application import DerivativesService
 from domains.execution.application import ExecutionApplicationService
+from domains.execution.oms.service import OrderManagementService
 from domains.instruments.service import InstrumentService
 from domains.jobs.service import JobService
 from domains.market_data.live import LiveMarketDataService
@@ -21,6 +22,7 @@ from domains.market_data.service import MarketDataService
 from domains.market_data.streaming.live_state import LiveMarketStore
 from domains.microstructure.application import MicrostructureApplicationService
 from domains.portfolio.application import PortfolioApplicationService
+from domains.portfolio.optimisation import PortfolioOptimisationService
 from domains.portfolio.service import PortfolioService
 from domains.reports.composition import (
     ExecutionWindowComposer,
@@ -28,10 +30,12 @@ from domains.reports.composition import (
     ValuationContextComposer,
 )
 from domains.reports.order_analysis import OrderAnalysisService
+from domains.research.service import ResearchService
 from domains.risk.application import RiskApplicationService
 from domains.scenarios.service import ScenarioService
 from domains.users.models import User
 from domains.users.service import UserService
+from domains.warehouse.service import WarehouseService
 from infrastructure.cache.client import Cache, get_cache
 from infrastructure.database.session import get_sessionmaker
 from infrastructure.security.tokens import TokenError, decode_token
@@ -140,6 +144,27 @@ def live_market_service(
     )
 
 
+def trading_service(
+    session: SessionDep,
+    settings: SettingsDep,
+    live: LiveMarketServiceDep,
+) -> OrderManagementService:
+    """The OMS. Takes the live market service because a paper fill is decided
+    against an observed quote, and takes the live-trading flag because whether
+    an order may reach a real broker is a deployment decision, not a per-request
+    one."""
+    return OrderManagementService(
+        session,
+        InstrumentService(session),
+        live,
+        settings,
+        # The vault, so a live account's token is fetched and renewed per
+        # request rather than read from the environment. A paper account never
+        # touches it.
+        broker_auth=BrokerAuthService(session, settings),
+    )
+
+
 def microstructure_service(
     session: SessionDep, settings: SettingsDep, store: ObjectStoreDep
 ) -> MicrostructureApplicationService:
@@ -189,6 +214,29 @@ def order_analysis_service(
     return OrderAnalysisService(session, settings, store)
 
 
+def portfolio_optimisation(
+    session: SessionDep, settings: SettingsDep, store: ObjectStoreDep
+) -> PortfolioOptimisationService:
+    """Portfolio construction. Reads warehouse history for the covariance."""
+    return PortfolioOptimisationService(session, settings, store)
+
+
+def research_service(
+    session: SessionDep, settings: SettingsDep, store: ObjectStoreDep
+) -> ResearchService:
+    """Backtests and the experiment record. Reads the warehouse; writes curves
+    and fills to the object store because they grow with the run's length."""
+    return ResearchService(session, settings, store)
+
+
+def warehouse_service(
+    session: SessionDep, settings: SettingsDep, store: ObjectStoreDep
+) -> WarehouseService:
+    """The historical warehouse. Takes the object store because the data is
+    there and only the registry is in the database."""
+    return WarehouseService(session, settings, store)
+
+
 def scenario_service(session: SessionDep) -> ScenarioService:
     return ScenarioService(session)
 
@@ -231,5 +279,9 @@ RiskServiceDep = Annotated[RiskApplicationService, Depends(risk_service)]
 ExecutionServiceDep = Annotated[ExecutionApplicationService, Depends(execution_service)]
 ExecutionWindowComposerDep = Annotated[ExecutionWindowComposer, Depends(execution_window_composer)]
 ScenarioServiceDep = Annotated[ScenarioService, Depends(scenario_service)]
+WarehouseServiceDep = Annotated[WarehouseService, Depends(warehouse_service)]
+ResearchServiceDep = Annotated[ResearchService, Depends(research_service)]
+PortfolioOptimisationDep = Annotated[PortfolioOptimisationService, Depends(portfolio_optimisation)]
 FactorHistoryComposerDep = Annotated[FactorHistoryComposer, Depends(factor_history_composer)]
 OrderAnalysisServiceDep = Annotated[OrderAnalysisService, Depends(order_analysis_service)]
+TradingServiceDep = Annotated[OrderManagementService, Depends(trading_service)]

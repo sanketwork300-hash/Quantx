@@ -129,6 +129,18 @@ rmse, weighted_rmse, optimizer, status) -> `surface_parameters` (per slice:
 A stored surface must reproduce its reference IVs exactly from persisted
 parameters — no re-fitting on read. A regression test asserts this.
 
+## 4a. Delta-quoted skew — real-time Phase 2 (implemented)
+
+The surface characteristics record shape as `dsigma/dk` at the money. The same
+shape is also recorded the way a market quotes it — 25Δ and 10Δ risk reversal
+and butterfly — because nobody reconciles a broker's runs against a derivative.
+
+Computed on read from the stored SVI parameters rather than persisted: it is a
+pure function of five numbers per slice, so recomputation cannot disagree with a
+stored copy that has drifted, and adding a delta level needs no migration. The
+delta convention is forward (Black-76, undiscounted) and travels on every
+result. See `methodology.md` §8a-bis.
+
 ## 5. Historical surface analytics — Phase 3 (implemented)
 
 Every calibration records the surface's shape at **standard tenors** — 7, 30,
