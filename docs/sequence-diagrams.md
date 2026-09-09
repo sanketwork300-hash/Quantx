@@ -1,8 +1,7 @@
 # Sequence Diagrams
 
-ASCII sequence diagrams for the six flows that define the system. Diagrams 1-5
-are **implemented**; diagram 6 is a design commitment whose seams already exist
-(provider interface, `MarketState`, job system, envelope).
+ASCII sequence diagrams for the flows that define the system. All are
+**implemented**; each names the phase that built it.
 
 ---
 
@@ -334,3 +333,61 @@ risk and margin branches refuse rather than report the zeros.
 both sides, because building one per side would let a new underlying change the
 sample the current book is measured on, and the difference would then contain
 that change as well as the order.
+
+
+---
+
+## 8. Live market data  **[implemented, real-time Phase 1]**
+
+Two processes and a store between them. The API never opens a provider
+connection, which is what stops two readers getting different answers about the
+same instant.
+
+```
+User    Web        API           Redis        StreamWorker   Provider   QualityEngine
+ |       |          |              |               |             |            |
+ |-pick->|          |              |               |             |            |
+ |       |--POST /live/subscriptions------------->|              |            |
+ |       |          |--interest+TTL->|             |             |            |
+ |       |<-200 subscribed---------|               |             |            |
+ |       |          |              |               |             |            |
+ |       |          |              |<--read interest (5s loop)---|            |
+ |       |          |              |               |--resolve instrument+key->|
+ |       |          |              |               |             |            |
+ |       |          |              |               |--quotes---->|            |
+ |       |          |              |               |<--payload---|            |
+ |       |          |              |               |--normalise (spec)------->|
+ |       |          |              |               |   report: read/missing/unmapped
+ |       |          |              |               |--score quote------------>|
+ |       |          |              |               |<-MarketDataQuality-------|
+ |       |          |              |               |                          |
+ |       |          |              |  ordering + duplicate checks             |
+ |       |          |              |<--put quote+quality (TTL)--|             |
+ |       |          |              |<--put feed health----------|             |
+ |       |          |              |               |             |            |
+ |       |--GET /live/quotes------>|              |              |            |
+ |       |          |--read------->|              |              |            |
+ |       |<-prices + age + quality-|              |              |            |
+ |       |   + the ids it has none for            |              |            |
+ |       |          |              |              |              |            |
+ |       |--GET /live/state------->|              |              |            |
+ |       |          |--read------->|              |              |            |
+ |       |          |--MarketStateBuilder (refuses quotes after as_of)         |
+ |       |<-content-addressed state_id------------|              |            |
+```
+
+Three points the diagram is drawn to make.
+
+**The normalisation report is on the hot path, not beside it.** Every read says
+which fields it found, which mapped paths were absent and which payload keys
+nothing claims. A provider renaming a field is visible on the first response
+rather than as quotes that gradually become empty.
+
+**Ordering and duplicate checks happen before the store, not after.** A replayed
+or reordered quote is rejected there; once a stale price is in the store,
+nothing downstream can tell it from a fresh one.
+
+**The state is where the live path ends.** Everything after this diagram —
+pricing, surfaces, risk, margin, execution — takes a `MarketState` and cannot
+tell whether it came from a feed or from a file, which is the property that
+makes a live analysis reproducible later.

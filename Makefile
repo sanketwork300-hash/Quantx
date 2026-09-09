@@ -84,6 +84,10 @@ layering:  ## Enforce the architecture layering rules
 check: lint layering test  ## Everything CI runs
 
 # ------------------------------------------------------------------- frontend
+.PHONY: stream
+stream:  ## Run the live market-data feed worker
+	$(PY) -m apps.stream.main
+
 .PHONY: web-install
 web-install:  ## Install frontend dependencies
 	cd web && npm install

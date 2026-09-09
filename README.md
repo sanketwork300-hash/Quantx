@@ -48,12 +48,18 @@ produced it, the assumptions that were made, and what the platform could not do.
 
 ---
 
-## Status: Phases 0 through 11 complete
+## Status: Phases 0 through 11 complete, plus live market data
 
-All eleven phases in `docs/backlog.md` have shipped, each as a vertical slice —
-data model, service, API, tests, docs and UI — and each gated on the previous
-one's acceptance criteria passing in CI. The backlog records what every phase
-claimed and the test that carries the claim.
+All eleven analytical phases in `docs/backlog.md` have shipped, each as a
+vertical slice — data model, service, API, tests, docs and UI — and each gated
+on the previous one's acceptance criteria passing in CI. The backlog records
+what every phase claimed and the test that carries the claim.
+
+On top of those sit two further slices: a **broker credential vault**, so a
+provider token is granted by a user rather than pasted into an environment file,
+and **real-time Phase 1**, which brings a live feed in through the same
+`MarketDataProvider` interface and out as the same `MarketState` every engine
+already consumes.
 
 **Phase 0 — foundation.**
 Repository skeleton with layering rules **enforced in CI**; Docker Compose
@@ -243,6 +249,45 @@ plus opt-in benchmarks.
 
 ---
 
+### Groundwork — broker credentials without an environment variable
+
+Not a numbered phase, and done before the real-time provider work depends on it.
+A broker access token is a bearer credential for someone's brokerage account, so
+it is no longer configuration: each user grants their own through the provider's
+own sign-in, it is sealed with **AES-256-GCM** and bound to the row that holds
+it, and it is renewed without anyone being asked wherever the provider allows
+that. What stays in `.env` is the app registration and the encryption key —
+neither of which rotates on the provider's schedule.
+
+An expiry is recorded **only when the provider states one**. A credential with no
+declared lifetime is used until the provider refuses it, and the refusal is what
+retires it; assuming a lifetime nobody published either interrupts users holding
+working credentials or reports dead ones as live, and the second failure shows up
+as market data that is quietly missing. With no encryption key configured the
+platform declines to store a credential at all rather than storing one it cannot
+protect. See [`docs/credentials.md`](docs/credentials.md).
+
+### Real-time Phase 1 — live market data
+
+A live provider behind the existing `MarketDataProvider` interface, an
+instrument master that joins the provider's identifiers to canonical ones, a
+feed worker in its own process, and a `MarketState` assembled from what the feed
+delivered — so a live price reaches a pricing model the same way a chain
+uploaded from a CSV does.
+
+Three things it refuses to do. It never falls back to the **synthetic market**:
+a provider that cannot be built raises rather than substituting one, and the
+synthetic market will not be constructed at all in a production-like
+environment. It never **invents a field**: the
+payload-to-schema mapping is versioned data, and every read reports which fields
+it found, which mapped paths were absent and which payload keys nothing claims —
+so a provider renaming `last_price` is visible on the first response rather than
+as quotes that quietly become empty. And it ships **no decoder for a provider's
+binary wire format**; the protobuf decoder loads a module generated from the
+provider's own `.proto` and refuses to start without one, because plausible
+numbers from a format nobody checked is the worst failure a market-data system
+has. See [`docs/live-market-data.md`](docs/live-market-data.md).
+
 ## Five ideas the whole design rests on
 
 **1. Observations are never overwritten by estimates.**
@@ -326,6 +371,7 @@ multiplier.
 ```bash
 cp .env.example .env
 python -c "import secrets; print(secrets.token_hex(32))"   # -> QIP_SECRET_KEY
+python scripts/generate_credential_key.py                  # -> QIP_CREDENTIAL_ENCRYPTION_KEYS
 docker compose up -d --build
 ```
 
@@ -443,6 +489,8 @@ interpreter.
 | [`docs/methodology.md`](docs/methodology.md) | Formulas, conventions, assumptions, limitations |
 | [`docs/database.md`](docs/database.md) | ERD, indexing, what does *not* go in Postgres |
 | [`docs/market-data.md`](docs/market-data.md) | Provider interface, canonical schemas, quality engine |
+| [`docs/credentials.md`](docs/credentials.md) | Broker credentials: why they are not environment variables |
+| [`docs/live-market-data.md`](docs/live-market-data.md) | Live feed: transports, normalisation, instrument master |
 | [`docs/instruments.md`](docs/instruments.md) | Canonical identity and resolution |
 | [`docs/api.md`](docs/api.md) | API contract, current and committed |
 | [`docs/sequence-diagrams.md`](docs/sequence-diagrams.md) | The five flows that define the system |

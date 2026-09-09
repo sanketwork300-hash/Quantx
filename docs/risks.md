@@ -21,6 +21,21 @@ feature may be built such that it only works in provider mode.
 synthetic data cannot substitute for. Phase 3's time-series analytics and the ML
 impact model remain explicitly gated on real historical data existing.
 
+**Real-time Phase 1 adds a fourth mode and one new residual.** A live provider
+now serves the same `MarketDataProvider` interface, so provider mode is real
+rather than notional. The new exposure is not availability but *substitution*:
+a live integration that silently degrades looks exactly like a quiet market. The
+three mechanisms against it are that the payload mapping reports every field it
+could not find, that a response which cannot be matched to the request is
+refused rather than attached to the nearest instrument, and that the synthetic
+market is refused at construction in a production-like environment so it can
+never stand in for a feed that failed.
+
+The licensing half of R1 is unchanged and is now concrete: the market-data
+account's entitlement governs what may be shown to whom, and nothing in Phase 1
+exposes raw provider payloads beyond that account. A free API is not a
+redistributable one.
+
 **Phase 10 turned this risk into a mechanism.** Microstructure is the part of
 the platform most exposed to R1 — L2 and event tapes are the least available and
 most licence-encumbered data there is — so rather than assuming the data, it

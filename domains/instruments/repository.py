@@ -147,6 +147,42 @@ class InstrumentRepository:
         )
         await self._session.flush()
 
+    async def add_aliases(self, source: str, mapping: dict[uuid.UUID, str]) -> int:
+        """Upsert many aliases in two round trips rather than two per alias.
+
+        An instrument master runs to tens of thousands of rows; doing a select
+        and an insert per alias turns a one-minute load into a twenty-minute one
+        for no reason. Returns the number of rows written.
+        """
+        if not mapping:
+            return 0
+
+        symbols = set(mapping.values())
+        stmt = select(InstrumentAliasORM).where(
+            InstrumentAliasORM.source == source,
+            InstrumentAliasORM.alias_symbol.in_(symbols),
+        )
+        existing = {
+            row.alias_symbol: row for row in (await self._session.execute(stmt)).scalars().all()
+        }
+
+        written = 0
+        for instrument_id, alias_symbol in mapping.items():
+            row = existing.get(alias_symbol)
+            if row is not None:
+                if row.instrument_id != instrument_id:
+                    row.instrument_id = instrument_id
+                    written += 1
+                continue
+            self._session.add(
+                InstrumentAliasORM(
+                    instrument_id=instrument_id, source=source, alias_symbol=alias_symbol
+                )
+            )
+            written += 1
+        await self._session.flush()
+        return written
+
     async def find_by_alias(self, source: str, alias_symbol: str) -> Instrument | None:
         stmt = (
             select(InstrumentORM)

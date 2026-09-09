@@ -293,6 +293,72 @@ not be the unsafe one. `TestIngestingWithNothingSaidAboutTheFile` does the same
 for a long-form file and asserts that the header-name inference is reported
 rather than done quietly.
 
+### Testing that a secret stays a secret
+
+`tests/unit/test_credential_vault.py` and
+`tests/integration/test_broker_connections.py` guard a class of bug that no
+functional test would catch, because the feature works perfectly while leaking.
+
+The disclosure assertions are made against the *raw response body* rather than
+against named fields — `assert ACCESS_TOKEN not in completed.text` — so a field
+added later that happens to carry the token fails the test that already exists,
+instead of needing a new one nobody thought to write. The same assertion is made
+against the stored row (`test_the_token_is_not_readable_from_the_row_that_holds_it`)
+and against the audit log (`test_no_audit_entry_carries_the_credential`), which
+are the two places a credential most plausibly ends up in the clear.
+
+The handoff tests assert what must *not* work: a replayed state, another
+account's state, an invented state, and an API access token presented as a state.
+The last one exists because both tokens are signed with the same key and only a
+`typ` claim separates them — a separation that is invisible in the type system
+and would survive any amount of ordinary testing.
+
+The expiry tests are the ones that pin the judgement rather than the mechanism.
+`test_an_undeclared_expiry_is_not_treated_as_an_expiry` fails if the platform
+ever starts assuming a lifetime for a provider that published none, and
+`test_a_renewal_that_returns_no_new_refresh_token_keeps_the_old_one` fails if a
+connection that should renew indefinitely instead dies at its first renewal —
+which is the kind of defect that appears a day after deployment, once, per user.
+
+Every provider exchange in these tests goes through `FakeOAuthClient`. A test
+that can be made to reach a real broker is a test that will one day present a
+real credential to one.
+
+### Testing a feed nobody can connect to in CI
+
+`tests/unit/test_market_stream.py` and
+`tests/integration/test_live_market_data.py` split the problem where the risk
+actually is. The connection lifetime — backoff, subscription replay, duplicate
+suppression, ordering, staleness — is identical whichever venue is on the other
+end, and every one of those fails *silently* when it is wrong, so it is tested
+with no provider, socket or database anywhere near it.
+
+The integration tests then run the real thing with one substitution: the
+transport is scripted rather than a socket. The normalisation, the quality
+scoring, the live store, the `MarketState` assembly and the API are all
+production code, so a passing test is a test of the platform and not of a mock.
+
+The assertions worth naming are the ones that pin an absence:
+`test_an_older_observation_never_overwrites_a_newer_one` fails if a replayed
+quote can make the market move backwards;
+`test_a_connection_delivering_nothing_reports_stale` fails if a silent socket
+becomes indistinguishable from a quiet session; and
+`test_the_counter_resets_only_when_something_arrived` fails if a provider that
+accepts and immediately drops would be retried at the floor delay forever.
+
+`test_a_renamed_field_shows_up_as_missing_and_unmapped_together` is the one that
+justifies the whole normalisation design. A provider renames a field, the reader
+finds nothing there, and from then on every quote carries a null last price —
+which downstream is indistinguishable from an instrument nobody is trading. The
+test asserts that this state is *reported*, not that it cannot happen.
+
+`TestExpiryIsNotGuessed` covers an off-by-one that changes a contract's identity,
+its canonical key and its time to expiry. The interesting case is
+`test_a_name_can_only_choose_between_the_two_candidates`: the contract name is
+matched against renderings of the two candidate dates rather than parsed, so a
+name format the code cannot read degrades to "could not resolve" instead of
+producing a third date.
+
 ## 5. Regression / golden files
 
 Committed fixtures with committed expected outputs:

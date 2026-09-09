@@ -70,5 +70,13 @@ class InstrumentService:
     async def add_alias(self, instrument_id: uuid.UUID, source: str, alias_symbol: str) -> None:
         await self.repository.add_alias(instrument_id, source, alias_symbol)
 
+    async def add_aliases(self, source: str, mapping: dict[uuid.UUID, str]) -> int:
+        """Upsert many provider identifiers at once. See the repository."""
+        return await self.repository.add_aliases(source, mapping)
+
+    async def find_by_alias(self, source: str, alias_symbol: str) -> Instrument | None:
+        """The instrument a provider's own identifier refers to."""
+        return await self.repository.find_by_alias(source, alias_symbol)
+
     async def list_aliases(self, instrument_id: uuid.UUID) -> list[tuple[str, str]]:
         return await self.repository.list_aliases(instrument_id)

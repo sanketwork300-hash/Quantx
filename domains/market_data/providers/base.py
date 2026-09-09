@@ -46,6 +46,62 @@ class CapabilityNotSupported(ProviderError):
         self.capability = capability
 
 
+class ProviderUnavailable(ProviderError):
+    """The provider could not be reached, or refused to serve the request.
+
+    Distinct from a provider that answered and had nothing: "we could not ask"
+    and "there is no data" lead to different decisions, and collapsing them is
+    how an outage comes to look like a quiet market.
+    """
+
+    def __init__(self, provider: str, detail: str, status_code: int | None = None) -> None:
+        super().__init__(f"{provider} unavailable: {detail}")
+        self.provider = provider
+        self.detail = detail
+        self.status_code = status_code
+
+
+class AuthenticationFailed(ProviderError):
+    """The provider rejected the credential in use.
+
+    Carried separately because it is the one provider failure a *user* can fix,
+    by reconnecting; everything else is an operator's problem.
+    """
+
+    def __init__(self, provider: str, detail: str) -> None:
+        super().__init__(f"{provider} rejected the credential: {detail}")
+        self.provider = provider
+        self.detail = detail
+
+
+class InvalidMarketData(ProviderError):
+    """A response arrived and could not be read as market data.
+
+    Raised rather than returning a quote of ``None``s: a malformed payload is a
+    broken integration, and a calculation must not be handed something that
+    looks like a market with nothing in it.
+    """
+
+    def __init__(self, provider: str, detail: str, evidence: tuple[str, ...] = ()) -> None:
+        super().__init__(f"{provider} returned unreadable market data: {detail}")
+        self.provider = provider
+        self.detail = detail
+        self.evidence = evidence
+
+
+class InstrumentNotMapped(ProviderError):
+    """The platform holds no provider identifier for this instrument.
+
+    Almost always means the instrument master has not been loaded, or was loaded
+    with a segment selection that excluded this contract.
+    """
+
+    def __init__(self, provider: str, instrument_id) -> None:
+        super().__init__(f"{provider} has no identifier recorded for instrument {instrument_id}")
+        self.provider = provider
+        self.instrument_id = instrument_id
+
+
 class MarketDataProvider(ABC):
     #: Stable identifier recorded in ``Quote.source`` and in provenance.
     name: str = "abstract"

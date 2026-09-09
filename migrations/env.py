@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Importing the ORM modules is what populates Base.metadata. A model that is not
 # imported here is invisible to autogenerate, so this list is the registry.
+import domains.broker_auth.orm  # noqa: F401, E402
 import domains.derivatives.orm  # noqa: F401, E402
 import domains.execution.orm  # noqa: F401, E402
 import domains.instruments.orm  # noqa: F401, E402

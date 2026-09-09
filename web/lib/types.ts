@@ -1779,3 +1779,134 @@ export interface OrderAnalysisSummary {
   branch_status: Record<string, ResultStatus>;
   created_at: string;
 }
+
+// --------------------------------------------------------- broker connections
+
+export type BrokerProvider = "upstox";
+
+export type ConnectionStatus =
+  | "CONNECTED"
+  | "NEEDS_REAUTHORIZATION"
+  | "REVOKED";
+
+/**
+ * Where an expiry came from. `UNDECLARED` means the provider stated no
+ * lifetime, so none is shown rather than one being invented.
+ */
+export type ExpirySource = "PROVIDER_DECLARED" | "UNDECLARED";
+
+export interface BrokerConnection {
+  id: string;
+  provider: BrokerProvider;
+  status: ConnectionStatus;
+  provider_account_id: string | null;
+  scopes: string[];
+  expires_at: string | null;
+  expiry_source: ExpirySource;
+  has_refresh_token: boolean;
+  connected_at: string | null;
+  last_refreshed_at: string | null;
+  last_used_at: string | null;
+  last_error: string | null;
+}
+
+export interface ConnectionList {
+  items: BrokerConnection[];
+}
+
+export interface ProviderStatus {
+  provider: BrokerProvider;
+  configured: boolean;
+  missing_settings: string[];
+}
+
+export interface ProviderList {
+  items: ProviderStatus[];
+  credential_storage_ready: boolean;
+  credential_storage_detail: string | null;
+}
+
+export interface AuthorizationHandoff {
+  provider: BrokerProvider;
+  authorization_url: string;
+  state: string;
+  expires_in: number;
+}
+
+// ------------------------------------------------------------ live market data
+
+export type FeedStatus =
+  | "DISCONNECTED"
+  | "CONNECTING"
+  | "CONNECTED"
+  | "STALE"
+  | "RECONNECTING"
+  | "STOPPED";
+
+export interface LiveQuote {
+  instrument_id: string;
+  symbol: string;
+  exchange: string;
+  asset_class: string;
+  exchange_timestamp: string;
+  receive_timestamp: string;
+  /** Seconds since the exchange stamped it. A price without a visible age gets
+   * treated as current whatever it actually is. */
+  age_seconds: number;
+  source: string;
+  feed: string;
+  bid_price: string | null;
+  bid_size: string | null;
+  ask_price: string | null;
+  ask_size: string | null;
+  last_price: string | null;
+  volume: string | null;
+  open_interest: string | null;
+  /** Null when there is no genuine two-sided market — never the last print. */
+  mid_price: string | null;
+  quality: Quality | null;
+}
+
+export interface LiveQuotes {
+  items: LiveQuote[];
+  /** Requested instruments with no live price. Returned so a short answer is
+   * never mistaken for a complete one. */
+  unavailable: string[];
+  as_of: string;
+}
+
+export interface FeedHealth {
+  feed: string;
+  status: FeedStatus;
+  updated_at: string;
+  connected_since: string | null;
+  last_event_at: string | null;
+  events_received: number;
+  reconnects: number;
+  subscribed_instruments: number;
+  last_error: string | null;
+}
+
+export interface LiveStatus {
+  provider: string;
+  transport: string;
+  delivers_every_update: boolean;
+  poll_interval_seconds: number | null;
+  health: FeedHealth | null;
+  unavailable_reason: string | null;
+}
+
+export interface LiveState {
+  state_id: string;
+  as_of_timestamp: string;
+  quote_count: number;
+  sources: string[];
+  unavailable: string[];
+  quotes: Record<string, Record<string, unknown>>;
+}
+
+export interface Subscription {
+  feed: string;
+  instrument_ids: string[];
+  ttl_seconds: number;
+}

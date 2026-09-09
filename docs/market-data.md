@@ -66,15 +66,45 @@ raise `CapabilityNotSupported`, which the service layer converts into a
 | --- | --- | --- |
 | `CSVMarketDataProvider` | user-uploaded / research CSV directories with an explicit column mapping | quotes, option chains, bars |
 | `SyntheticMarketDataProvider` | deterministic, seeded, arbitrage-clean synthetic market for tests, demos and CI | instruments, quotes, option chains, bars |
+| `UpstoxMarketDataProvider` | live Indian market data over the provider's REST API, and the snapshot half of the live feed | quotes, option chains, order book, bars |
+
+`UpstoxMarketDataProvider` deliberately does **not** declare `INSTRUMENTS`. Its
+instrument directory comes from `UpstoxInstrumentMaster`, and declaring a
+capability the class does not serve would let a caller plan around it and then
+fail halfway through — which is the exact thing the capability declaration
+exists to prevent. It declares `ORDER_BOOK` and not `BOOK_EVENTS`, for the
+reason given above: periodic depth is not the messages that produced it.
 
 `SyntheticMarketDataProvider` matters more than it looks: it is what keeps the
 whole platform usable and testable when no market data is available at all
 (build spec §8), and it gives quantitative tests a market whose true parameters
 are known.
 
+Selection is one function, `build_provider`, so no other module knows which
+providers exist. It refuses rather than substitutes: a live provider that cannot
+be built raises `ProviderNotAvailable`, and the synthetic market will not be
+constructed at all in a production-like environment. There is no fallback path,
+because a fallback here means serving generated prices as real ones.
+
 Planned: `ParquetMarketDataProvider`, `CryptoMarketDataProvider`,
 `IBKRMarketDataProvider`, `NSECompatibleProvider`. Adding one must require
 touching exactly one directory.
+
+### Where an authenticated provider gets its credential
+
+A provider that needs to authenticate does not read one from configuration. It
+asks the credential vault for the calling user's own:
+
+```python
+credential = await broker_auth.access_token(user_id, BrokerProvider.UPSTOX)
+```
+
+The vault renews the credential if the provider declared an expiry that is close,
+and raises `ReauthorizationRequired` — with a reason worth showing the user —
+when it cannot be renewed. When the provider refuses a credential, the adapter
+reports that back with `report_rejection` rather than swallowing it, because for
+a provider that declares no lifetime the refusal is the only signal that the
+credential has lapsed. See [`credentials.md`](credentials.md).
 
 ## 3. Canonical schemas
 

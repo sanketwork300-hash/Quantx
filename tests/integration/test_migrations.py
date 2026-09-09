@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 EXPECTED_TABLES = {
     "users",
     "audit_logs",
+    "broker_connections",
     "instruments",
     "instrument_aliases",
     "uploads",
@@ -125,6 +126,7 @@ class TestMigrations:
         # Import every ORM module so Base.metadata is complete. (migrations/env.py
         # does the same, but importing it here would run the alembic script
         # outside an alembic context.)
+        import domains.broker_auth.orm  # noqa: F401
         import domains.derivatives.orm  # noqa: F401
         import domains.execution.orm  # noqa: F401
         import domains.instruments.orm  # noqa: F401

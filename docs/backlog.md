@@ -533,3 +533,126 @@ bracketed queue estimate into a cost figure would bury the gate. The third is
 the recommendation field under another name: any weighting of reference value
 against slippage against margin is a statement about someone's risk appetite,
 and the platform does not have one.
+
+## Groundwork — Broker credential vault  `[x]`
+
+Not a numbered phase: a prerequisite for the real-time provider work, done on
+its own because it changes how the platform holds a secret and that is worth
+finishing and testing before anything depends on it.
+
+The problem it removes is stated plainly in `docs/credentials.md` — a broker
+access token pasted into `.env` and the process restarted every time the provider
+expires it, with one identity shared across the whole installation and nothing
+recording who connected what.
+
+- [x] `infrastructure/security/crypto.py`: AES-256-GCM sealing with key rotation
+      and associated data binding each ciphertext to its own row
+- [x] `domains/broker_auth`: a per-user credential obtained through the
+      provider's own authorization-code flow, renewed where the provider allows
+      it and marked `NEEDS_REAUTHORIZATION` where it does not
+- [x] `broker_connections` table holding ciphertext only — no column on it can
+      hold a token in the clear
+- [x] Signed, single-use `state` bound to caller, provider and nonce, with a
+      `typ` claim separating it from an API access token
+- [x] `/connections` endpoints; no response, log or audit entry carries token
+      material
+- [x] Six audit actions covering the whole life of a connection
+- [x] UI: the connections page and the provider callback
+- [x] `scripts/generate_credential_key.py` and a documented rotation procedure
+
+**Acceptance — verified**
+
+| Criterion | Where |
+| --- | --- |
+| **No broker token is ever configured, returned, logged or stored in the clear** | `tests/integration/test_broker_connections.py::test_no_response_ever_carries_the_token` scans raw response bodies rather than named fields; `test_the_token_is_not_readable_from_the_row_that_holds_it` scans the stored ciphertext; `test_no_audit_entry_carries_the_credential` scans the audit metadata |
+| A credential is per user | `test_a_second_account_cannot_see_the_first_ones_connection` — the second account lists nothing and gets 404 on the first's connection |
+| The handoff cannot be replayed, borrowed or forged | `TestTheAuthorizationHandoffIsNotForgeable` — a reused state, another account's state, an invented state and an API access token presented as a state are all refused with one code, and the provider is never called |
+| **An expiry the provider did not state is not invented** | `test_an_undeclared_expiry_is_not_treated_as_an_expiry` — no refresh is attempted and the token is used; `test_a_rejection_retires_a_credential_that_declared_no_expiry` — the provider's refusal, not a schedule, is what retires it; `tests/unit/test_credential_vault.py::test_a_response_with_no_lifetime_is_not_given_one` pins the parser |
+| A declared expiry is renewed without the user | `test_an_expiring_credential_is_renewed_without_the_user` — inside the refresh skew the credential is renewed and the connection stays `CONNECTED` |
+| A renewal that omits a new refresh token does not kill the connection | `test_a_renewal_that_returns_no_new_refresh_token_keeps_the_old_one` — two consecutive renewals both present the original refresh token (RFC 6749 §6 makes the new one optional) |
+| What cannot be renewed asks the user rather than failing quietly | `test_a_declared_expiry_with_no_refresh_token_asks_the_user_back` and `test_a_failed_renewal_leaves_a_connection_that_says_what_happened` — status and `last_error` both say why |
+| Rotating the encryption key does not disconnect anyone | `test_a_credential_sealed_under_a_retired_key_is_still_usable`; `tests/unit/test_credential_vault.py::test_a_retired_key_still_reads_the_rows_it_wrote` |
+| A rotation can actually be finished | `test_using_a_credential_after_a_rotation_migrates_the_row` — using a credential re-seals **both** halves under the active key, so the retired key stops being referenced and can be removed |
+| Rotation and renewal do not break each other | `test_renewing_a_credential_after_a_key_rotation_keeps_it_alive` — a renewal that carries the existing refresh token across must read it under the key it was written with, not the one just recorded; getting this wrong disconnects every user at their first renewal after a rotation and only then |
+| A ciphertext is useless in another row | `test_a_ciphertext_moved_to_another_row_does_not_open` |
+| No key means no storage, not plaintext storage | `test_without_an_encryption_key_the_flow_stops_before_the_broker` — refused before the user is sent to the broker, and `/connections/providers` says so up front |
+| An unregistered provider names the settings to fill in | `test_an_unregistered_provider_names_what_is_missing` |
+| A failed reconnect does not break a working connection | `test_a_failed_reconnect_does_not_break_a_working_connection` — the held credential is untouched, the status stays `CONNECTED`, and the failure is recorded in `last_error` |
+| Disconnecting erases the secret and keeps the record | `TestDisconnecting` — ciphertext gone, row and broker account id retained |
+
+**What is deliberately not here**: provider-side revocation on disconnect, and
+any assumed token lifetime. The platform cannot make a broker forget a token —
+only the broker can — so the audit entry says the local copy was destroyed and
+claims nothing more. And a lifetime nobody published is a guess that fails in
+both directions: too short interrupts users holding working credentials, too
+long reports dead ones as live and turns every provider call into a silent gap.
+
+## Real-time Phase 1 — Live market data  `[x]`
+
+The first slice of the real-time platform: a live provider, an instrument
+master, a feed, and a `MarketState` assembled from what the feed delivered.
+
+- [x] `UpstoxMarketDataProvider` behind the existing `MarketDataProvider`
+      interface — quotes, depth, bars and an option chain assembled from the
+      platform's own instrument master
+- [x] `NormalisationSpec`: the payload→schema mapping as versioned data, with a
+      per-read report of fields read, fields missing and payload keys claimed by
+      nothing
+- [x] `UpstoxInstrumentMaster`: provider file → canonical instruments plus the
+      alias rows joining platform ids to provider keys, with row conservation
+- [x] `read_expiry`: a midnight expiry instant resolved against the contract's
+      own name, or by a stated convention recorded on the instrument
+- [x] `domains/market_data/streaming`: subscriptions, backoff, event bus, live
+      store, decoders, two transports, and a manager that owns the connection
+- [x] Redis live state with a TTL, and cross-process subscription interest
+- [x] `LiveMarketDataService.live_market_state`: the join to every quant engine
+- [x] `/live/*` endpoints and the market stream worker `apps/stream/main.py`
+- [x] UI: the live market page, every price with its age
+
+**Acceptance — verified**
+
+The phase's own criterion — *user selects NIFTY → live price appears → bid/ask/
+OI/volume update → MarketState updates* — is
+`tests/integration/test_live_market_data.py::TestSelectingNiftyAndSeeingALivePrice`,
+end to end through the real provider normalisation, the real quality engine and
+the real store, with only the socket replaced.
+
+| Criterion | Where |
+| --- | --- |
+| A live price appears with bid, ask, volume and open interest | `test_a_live_price_appears_with_bid_ask_volume_and_open_interest` |
+| The price updates as the feed delivers | `test_the_price_updates_as_the_feed_delivers` |
+| **Every price carries its own age** | `test_every_live_price_carries_its_own_age` — a price with no visible age gets treated as current whatever it is |
+| **A MarketState is assembled from live prices** | `TestTheLiveMarketStateIsTheJoinToEverythingElse` — content-addressed, and `test_one_moment_and_one_set_of_prices_is_always_the_same_id` pins that one moment and one set of prices is always one id |
+| A quote from after the snapshot is not in it | `test_a_quote_stamped_after_the_snapshot_is_not_in_it` |
+| The reading report costs nothing on a healthy feed | `test_a_clean_reading_names_its_spec_and_nothing_more` and `test_a_reading_that_was_not_clean_carries_the_whole_report` — the full report rides on a quote only when something was missing or unclaimed |
+| **A renamed provider field is visible immediately** | `tests/unit/test_live_normalisation.py::test_a_renamed_field_shows_up_as_missing_and_unmapped_together` — the failure that otherwise runs for days as quotes that quietly become empty |
+| A quote whose age cannot be known is refused | `test_a_quote_whose_age_cannot_be_known_is_refused` — dating it to the read would make every stale price look fresh |
+| A response that cannot be matched to the request is refused | `test_an_unmatchable_response_is_refused_not_guessed` and `test_several_unidentifiable_entries_match_nothing` — there is no third fallback, because that is where one instrument's price gets attached to another's id |
+| **The instrument master conserves rows** | `test_every_row_is_accounted_for`, `test_a_filtered_row_still_closes_the_sum` |
+| Nothing in the master is coerced | `test_an_exchange_with_no_recorded_currency_is_refused`, `test_an_option_on_a_venue_with_no_recorded_exercise_style_is_refused`, `test_a_contract_whose_underlying_was_filtered_out_is_refused` |
+| The multiplier says where it came from | `test_the_multiplier_says_it_came_from_the_lot_size`, `test_an_index_with_no_lot_size_declares_its_multiplier_assumed` |
+| **A midnight expiry is resolved or declared** | `TestExpiryIsNotGuessed` — the contract name settles it where it can, a stated convention otherwise, and both candidates are recorded on the instrument |
+| An older observation never overwrites a newer one | `tests/unit/test_market_stream.py::test_an_older_observation_never_overwrites_a_newer_one` |
+| A silent connection is reported STALE | `test_a_connection_delivering_nothing_reports_stale` |
+| An unreadable frame is counted, not fatal | `test_an_unreadable_entry_is_counted_and_does_not_stop_the_feed` |
+| Backoff resets only on a connection that delivered | `test_the_counter_resets_only_when_something_arrived` — resetting on connect makes our own client a denial-of-service attack on the provider |
+| Every reconnect resends the whole subscription | `test_every_reconnect_resends_the_whole_subscription` |
+| A slow consumer loses the oldest events and is told | `test_a_slow_consumer_loses_the_oldest_events_and_is_told` |
+| **Synthetic prices are never a fallback** | `test_a_synthetic_deployment_says_its_prices_are_not_real`; `tests/unit/test_stream_worker.py::TestChoosingAProvider` — the synthetic market is refused at construction in a production-like environment, and a live provider that cannot be built raises rather than substituting one. Deliberately not a startup check: a deployment that only analyses uploaded chains never builds a provider, and `test_a_file_only_production_deployment_still_starts` pins that it can still start |
+| An instrument with no live price is named, not omitted | `test_an_instrument_with_no_live_price_is_named_not_omitted` |
+| A sampling transport does not claim to deliver every tick | `test_a_polling_transport_does_not_claim_to_deliver_every_tick` |
+| **The worker refuses to serve a generated market** | `tests/unit/test_stream_worker.py::test_it_refuses_to_run_against_the_synthetic_market` — a feed worker publishing the synthetic market into the live store would put invented prices behind every live endpoint |
+| A websocket with no frame decoder refuses to start | `test_a_websocket_without_a_frame_decoder_refuses_to_start` — a socket that stays up delivering zero quotes looks exactly like a quiet market |
+| The market-data account is named, never defaulted | `test_it_refuses_to_pick_a_market_data_account_for_you` — one entitlement serves the deployment, and whose it is has licensing consequences |
+| A poll with nothing subscribed is not sent | `test_it_does_not_call_the_provider_with_nothing_subscribed` |
+| The provider declares only what it serves | `TestWhatTheProviderDeclaresItCanDo` — no `INSTRUMENTS` (that is the master loader) and no `BOOK_EVENTS` (a snapshot feed cannot support a queue model), so a caller cannot plan around a capability and fail halfway through |
+
+**What is deliberately not here**: a `/ws/market` push socket, order-book event
+capability on either transport, and any decoder for a provider's binary wire
+format written from observation. The first would be a second copy of the live
+state with its own consistency question and no better update rate than a
+browser can render. The second would let a queue model be built on periodic
+snapshots, which is a model of a book nobody saw. The third is the worst failure
+a market-data system has — plausible numbers from a format nobody checked — so
+the protobuf decoder loads a module generated from the provider's own `.proto`
+and refuses to start without one.

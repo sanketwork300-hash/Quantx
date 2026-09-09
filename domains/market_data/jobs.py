@@ -102,5 +102,61 @@ async def ingest_option_chain(session: AsyncSession, job: Job) -> dict:
     return result.to_dict(serializer=lambda summary: summary.to_dict())
 
 
+async def load_instrument_master(session: AsyncSession, job: Job) -> dict:
+    """Load a provider's instrument file into instruments and alias mappings.
+
+    A job rather than a request handler: the published files run to hundreds of
+    thousands of rows, and the work belongs nowhere near an HTTP timeout.
+    """
+    from decimal import Decimal as _Decimal
+
+    from domains.instruments.service import InstrumentService
+    from domains.market_data.live import LiveMarketDataService
+    from domains.market_data.providers.master_source import decode_rows, fetch
+    from domains.market_data.providers.upstox_master import InstrumentMasterOptions
+    from domains.market_data.streaming.live_state import LiveMarketStore
+    from infrastructure.cache.client import get_cache
+
+    payload = job.input_reference
+    settings = get_settings()
+
+    url = payload.get("url") or settings.upstox_instruments_url
+    segments = tuple(payload.get("segments") or settings.upstox_segments)
+    underlyings = tuple(payload.get("underlyings") or settings.upstox_underlyings)
+
+    raw = await fetch(url)
+    options = InstrumentMasterOptions(
+        segments=segments,
+        underlyings=underlyings,
+        tick_size_scale=_Decimal(str(settings.upstox_tick_size_scale)),
+    )
+
+    service = LiveMarketDataService(
+        InstrumentService(session),
+        LiveMarketStore(get_cache(settings), settings.live_quote_ttl_seconds),
+    )
+    result = await service.load_instrument_master(decode_rows(raw), options)
+
+    return {
+        "url": url,
+        "segments": list(segments),
+        "underlyings": list(underlyings),
+        **result.to_provenance(),
+        #: A bounded sample rather than every rejection: a file with a hundred
+        #: thousand rows filtered out would otherwise write a hundred thousand
+        #: rows of explanation into the job result.
+        "rejected_sample": [
+            {
+                "row_number": row.row_number,
+                "instrument_key": row.instrument_key,
+                "reason": row.reason,
+                "detail": row.detail,
+            }
+            for row in result.rejected[:25]
+        ],
+    }
+
+
 def register_handlers() -> None:
     register(JobType.INGEST_OPTION_CHAIN, ingest_option_chain)
+    register(JobType.LOAD_INSTRUMENT_MASTER, load_instrument_master)

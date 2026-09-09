@@ -88,6 +88,93 @@ POST /api/v1/auth/login
 Rate limited per IP and per email. Failed logins are audit-logged; the response
 does not distinguish "unknown user" from "wrong password".
 
+## 4a. Broker connections
+
+A provider credential is granted by the user through the provider's own login
+and stored against their account. It is never configured as an environment
+variable, never shared between accounts, and never returned by any endpoint.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/connections/providers` | which providers this deployment is registered with, and whether credentials can be stored at all |
+| GET | `/connections` | the caller's connections |
+| GET | `/connections/{provider}` | one connection; 404 if the caller has none |
+| POST | `/connections/{provider}/authorize` | begin the handoff; returns where to send the browser |
+| POST | `/connections/{provider}/callback` | exchange the authorization code the provider returned |
+| DELETE | `/connections/{provider}` | erase the stored credential |
+
+### The handoff
+
+```http
+POST /api/v1/connections/upstox/authorize
+
+200
+{
+  "provider": "upstox",
+  "authorization_url": "https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=...&redirect_uri=...&state=...",
+  "state": "eyJhbGciOi...",
+  "expires_in": 600
+}
+```
+
+The browser goes to `authorization_url`. The provider redirects back to the
+configured `redirect_uri` — the frontend, not the API — with `code` and `state`
+in the query string, and the frontend posts them back:
+
+```http
+POST /api/v1/connections/upstox/callback
+{"code": "...", "state": "eyJhbGciOi..."}
+
+200
+{
+  "id": "...",
+  "provider": "upstox",
+  "status": "CONNECTED",
+  "provider_account_id": "UP-4471",
+  "scopes": [],
+  "expires_at": "2026-09-10T03:30:00Z",
+  "expiry_source": "PROVIDER_DECLARED",
+  "has_refresh_token": true,
+  "connected_at": "2026-09-09T09:31:04Z",
+  "last_refreshed_at": null,
+  "last_used_at": null,
+  "last_error": null
+}
+```
+
+The code is exchanged server-side, so no token reaches the browser. The `state`
+is a signed, single-use value bound to the caller and the provider; a replayed,
+expired, forged or cross-account state is refused with one code,
+`AUTHORIZATION_STATE_INVALID`, so probing the endpoint reveals nothing about
+which check failed. An API access token is not accepted as a state and vice
+versa, although both are signed with the same key.
+
+### `expiry_source` — the field that matters
+
+| Value | Meaning |
+| --- | --- |
+| `PROVIDER_DECLARED` | the provider stated a lifetime; `expires_at` is set and the credential is renewed shortly before it |
+| `UNDECLARED` | the provider stated no lifetime; `expires_at` is `null` and the credential is used until the provider refuses it |
+
+Nothing infers an expiry. A guessed lifetime either retires a working credential
+early or reports a dead one as live, and both failures show up as market data
+that is quietly missing rather than as an error.
+
+### Errors
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `PROVIDER_NOT_CONFIGURED` | 422 | no app registration; `missing_settings` names the settings to fill in |
+| `CREDENTIAL_STORAGE_UNAVAILABLE` | 422 | no encryption key, so no credential will be stored |
+| `AUTHORIZATION_STATE_INVALID` | 400 | the state did not check out |
+| `PROVIDER_REJECTED_AUTHORIZATION` | 422 | the provider refused the code; `provider_error` carries its own identifier |
+| `PROVIDER_UNAVAILABLE` | 422 | the provider's token endpoint could not be reached |
+
+Every step is audit-logged: `BROKER_AUTHORIZATION_STARTED`,
+`BROKER_CONNECTION_AUTHORIZED`, `BROKER_CONNECTION_REFRESHED`,
+`BROKER_CONNECTION_REVOKED`, `BROKER_AUTHORIZATION_FAILED`,
+`BROKER_CREDENTIAL_REJECTED`. No audit entry carries token material.
+
 ## 5. Instruments **[P0]**
 
 | Method | Path | Notes |
@@ -158,6 +245,88 @@ Chain response (abridged):
 
 Note what is **absent**: no `implied_volatility`, no `reference_value`, no
 `signal`. Phase 0 ships observation and quality only.
+
+## 6a. Live market data **[P1-realtime]**
+
+Everything here answers from the live store the stream worker writes. No route
+opens a provider connection: a request that fetched a price would give a
+different answer from the feed's, and neither would say which was right.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/live/status` | provider, transport, feed health, and why it is not delivering if it is not |
+| GET | `/live/quotes` | `instrument_ids` repeated; returns prices **and** the ids it has none for |
+| GET | `/live/quotes/{instrument_id}` | one instrument; 404 when no live price is held |
+| POST | `/live/subscriptions` | register interest; expires unless renewed |
+| DELETE | `/live/subscriptions` | drop interest |
+| GET | `/live/state` | a content-addressed `MarketState` built from live prices |
+| POST | `/live/instruments/refresh` | 202; loads the provider instrument file as a job |
+
+### Every price carries its age
+
+```http
+GET /api/v1/live/quotes?instrument_ids=...
+
+200
+{
+  "items": [{
+    "instrument_id": "...", "symbol": "NIFTY", "exchange": "NSE",
+    "exchange_timestamp": "2026-09-09T09:20:11+05:30",
+    "age_seconds": 1.4,
+    "bid_price": "24512.30", "ask_price": "24512.40",
+    "last_price": "24512.35", "mid_price": "24512.35",
+    "volume": "128400", "open_interest": "1250000",
+    "quality": {"overall_score": 0.94, "flags": []}
+  }],
+  "unavailable": [],
+  "as_of": "2026-09-09T03:50:12.482Z"
+}
+```
+
+`age_seconds` is carried rather than left to the caller to compute. A price with
+no visible age gets treated as current whatever it actually is.
+
+`mid_price` is `null` unless there is a genuine two-sided market. It is never a
+last trade standing in for a mid.
+
+`unavailable` lists requested instruments with no live price, so a short answer
+is never mistaken for a complete one.
+
+### `/live/status`
+
+```json
+{
+  "provider": "upstox",
+  "transport": "polling",
+  "delivers_every_update": false,
+  "poll_interval_seconds": 1.0,
+  "health": {"status": "CONNECTED", "events_received": 41208, "reconnects": 2, "last_error": null},
+  "unavailable_reason": null
+}
+```
+
+`delivers_every_update` is stated, not assumed. A sampling transport shows the
+latest state at its sample rate; a queue or intensity model must not be built on
+it, and this flag is what stops that by accident.
+
+`status` distinguishes `STALE` — connected, delivering nothing — from
+`DISCONNECTED`. A live socket delivering silence is otherwise indistinguishable
+from a quiet market.
+
+### `/live/state`
+
+```http
+GET /api/v1/live/state?instrument_ids=...&as_of=2026-09-09T03:50:00Z
+```
+
+`as_of` is the decision time and is part of the snapshot's identity. Omitted, it
+defaults to now, so every call returns a new `state_id` even if nothing moved —
+correct, because two moments are two snapshots. Pass it to get an id a later
+call reproduces, and to refuse any quote stamped after it (those are reported in
+`unavailable`). A naive `as_of` is rejected with `AS_OF_NOT_TIMEZONE_AWARE`.
+
+See [`live-market-data.md`](live-market-data.md) for the transports, the
+normalisation report and the instrument master.
 
 ## 7. Uploads **[P0]**
 

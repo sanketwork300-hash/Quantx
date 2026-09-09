@@ -747,6 +747,41 @@ came out *less* likely to fill. The constraint caught it; the test suite had not
 | --- | --- | --- |
 | `market_bars` | 1 | hypertable, `(instrument_id, interval, exchange_timestamp)` — deferred with the bars endpoint |
 
+### `broker_connections` — the one table that holds a secret
+
+```
++----------------------------+
+|    broker_connections      |
++----------------------------+
+| id (PK)                    |
+| user_id (FK -> users)      |
+| provider                   |   UQ(user_id, provider)
+| status                     |   CONNECTED | NEEDS_REAUTHORIZATION | REVOKED
+| encryption_key_id          |   which key sealed this row
+| access_token_nonce         |
+| access_token_ciphertext    |   AES-256-GCM
+| refresh_token_nonce        |
+| refresh_token_ciphertext   |   AES-256-GCM
+| provider_account_id        |
+| scopes JSONB               |
+| expires_at                 |   NULL unless the provider declared one
+| expiry_source              |   PROVIDER_DECLARED | UNDECLARED
+| connected_at               |
+| last_refreshed_at          |
+| last_used_at               |
+| last_error                 |
+| pending_state_nonce        |   the in-flight handoff; cleared on use
+| pending_state_expires_at   |
++----------------------------+
+```
+
+There is deliberately no column here capable of holding a token in the clear, so
+no code path can write one by accident. `expires_at` is nullable because a
+provider that declares no lifetime must not have one recorded for it —
+`expiry_source` says which case a row is in. Deleting a user cascades, which is
+the correct behaviour for a credential: it should not outlive the account it
+belongs to.
+
 ## 3. Indexing
 
 | Table | Index | Purpose |
@@ -759,6 +794,7 @@ came out *less* likely to fill. The constraint caught it; the test suite had not
 | `option_chain_snapshots` | `(underlying_id, as_of_timestamp DESC)` | history |
 | `jobs` | `(user_id, status, created_at DESC)` | polling |
 | `audit_logs` | `(user_id, created_at DESC)` | review |
+| `broker_connections` | `UQ(user_id, provider)`, index `(provider, status)` | one credential per user per provider; the index answers "which connections need re-authorization" |
 
 ## 4. TimescaleDB usage
 
@@ -772,7 +808,13 @@ application depends on Timescale-specific SQL.
 ## 5. What does *not* go in Postgres
 
 Per build spec §67: no L2 order-book histories, no tick tapes, no Monte Carlo
-paths, no raw uploaded files. Those live in the object store as Parquet with a
+paths, no raw uploaded files. Nor the **live market state**: the current
+quote per instrument is written at tick rate and lives in Redis under
+`qip:v1:quote:{instrument_id}` with a TTL, which is the point — an entry that
+stops being refreshed disappears rather than being served indefinitely as
+though the feed were still running. The live path adds no table at all: it
+reuses `instruments` and `instrument_aliases`, which is what the alias table
+was built for. Those live in the object store as Parquet with a
 metadata row in Postgres holding the key, schema version, row count and digest.
 
 The rule of thumb used here: if a dataset grows with market activity rather than

@@ -118,6 +118,22 @@ services:
     depends_on:
       migrate: {condition: service_completed_successfully}
 
+  # The live feed. One process holds one provider connection and writes the
+  # Redis live store; the API only ever reads that store, so two readers cannot
+  # get different answers about the same instant.
+  #
+  # Not started by default: it needs a connected broker account
+  # (QIP_MARKET_DATA_ACCOUNT_EMAIL) and a live provider, and it exits rather
+  # than serving generated prices. Bring it up with:
+  #   docker compose --profile live up -d stream
+  stream:
+    <<: *api-image
+    command: ["python", "-m", "apps.stream.main"]
+    profiles: ["live"]
+    restart: unless-stopped
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
   scheduler:
     <<: *api-image
     command:

@@ -352,6 +352,24 @@ Cache keys embed the data version so invalidation is implicit:
   upload routes first.
 - Audit log: append-only `audit_logs` for auth events, uploads, portfolio
   mutation, and every job submission.
+- **A live feed is a separate process from the API.** The market stream worker
+  holds the provider connection and writes a Redis live store with a TTL; every
+  API route reads that store. No request path opens a provider connection, so
+  two readers cannot get different answers about the same instant, and a live
+  price reaches a quant engine only as a `MarketState`. See
+  [`live-market-data.md`](live-market-data.md).
+- **Broker credentials are not configuration.** A provider access token is a
+  bearer credential for someone's brokerage account, so it is never an
+  environment variable and never shared across users. Each user grants their own
+  through the provider's authorization-code flow; it is sealed with AES-256-GCM,
+  bound by associated data to the row that holds it, and refreshed without
+  anyone being asked where the provider permits it. No response, log or audit
+  entry carries token material, and with no encryption key configured the
+  platform declines to store a credential rather than storing one it cannot
+  protect. See [`credentials.md`](credentials.md).
+- **Token purpose is part of the token.** API access tokens and OAuth handoff
+  states are signed with the same key and separated by a `typ` claim that is
+  checked on decode, so one can never be presented as the other.
 
 ## 12. Observability
 

@@ -47,6 +47,10 @@ class JobType(StrEnum):
     IMPORT_BOOK_DATA = "IMPORT_BOOK_DATA"
     ANALYZE_MICROSTRUCTURE = "ANALYZE_MICROSTRUCTURE"
     FIT_INTENSITY = "FIT_INTENSITY"
+    #: Load a provider's instrument file into canonical instruments and the
+    #: alias mapping. A job rather than a request because the published files
+    #: are large and the work has nothing to do with any one HTTP call.
+    LOAD_INSTRUMENT_MASTER = "LOAD_INSTRUMENT_MASTER"
     # Later phases register their types here; the enum is the contract between
     # the API, the worker and the frontend.
 

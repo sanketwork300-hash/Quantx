@@ -25,6 +25,7 @@ export default function RootLayout({
               <nav>
                 <Link href="/">Dashboard</Link>
                 <div className="group">Markets</div>
+                <Link href="/live">Live market</Link>
                 <Link href="/markets/chains">Option chains</Link>
                 <Link href="/markets/analyses">Volatility analyses</Link>
                 <Link href="/markets/surfaces">Surfaces</Link>
@@ -42,6 +43,7 @@ export default function RootLayout({
                 <Link href="/data">Imports</Link>
                 <div className="group">Account</div>
                 <Link href="/login">Sign in</Link>
+                <Link href="/connections">Broker connections</Link>
               </nav>
             </aside>
             <main className="main">{children}</main>

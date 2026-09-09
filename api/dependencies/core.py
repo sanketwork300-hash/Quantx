@@ -10,12 +10,15 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.errors import Unauthorized
+from domains.broker_auth.service import BrokerAuthService
 from domains.derivatives.advanced import AdvancedDerivativesService
 from domains.derivatives.application import DerivativesService
 from domains.execution.application import ExecutionApplicationService
 from domains.instruments.service import InstrumentService
 from domains.jobs.service import JobService
+from domains.market_data.live import LiveMarketDataService
 from domains.market_data.service import MarketDataService
+from domains.market_data.streaming.live_state import LiveMarketStore
 from domains.microstructure.application import MicrostructureApplicationService
 from domains.portfolio.application import PortfolioApplicationService
 from domains.portfolio.service import PortfolioService
@@ -106,6 +109,11 @@ def user_service(session: SessionDep) -> UserService:
     return UserService(session)
 
 
+def broker_auth_service(session: SessionDep, settings: SettingsDep) -> BrokerAuthService:
+    """Provider credentials. The real HTTP OAuth client; tests override it."""
+    return BrokerAuthService(session, settings)
+
+
 def instrument_service(session: SessionDep) -> InstrumentService:
     return InstrumentService(session)
 
@@ -118,6 +126,18 @@ def market_data_service(
     session: SessionDep, settings: SettingsDep, store: ObjectStoreDep
 ) -> MarketDataService:
     return MarketDataService(session, settings, store)
+
+
+def live_market_service(
+    session: SessionDep, settings: SettingsDep, cache: CacheDep
+) -> LiveMarketDataService:
+    """Live market data. Reads the store the feed worker writes, never a feed."""
+    return LiveMarketDataService(
+        InstrumentService(session),
+        LiveMarketStore(cache, settings.live_quote_ttl_seconds),
+        source=settings.market_data_provider,
+        subscription_ttl_seconds=settings.live_subscription_ttl_seconds,
+    )
 
 
 def microstructure_service(
@@ -192,6 +212,7 @@ def valuation_composer(
 
 
 UserServiceDep = Annotated[UserService, Depends(user_service)]
+BrokerAuthServiceDep = Annotated[BrokerAuthService, Depends(broker_auth_service)]
 DerivativesServiceDep = Annotated[DerivativesService, Depends(derivatives_service)]
 AdvancedDerivativesDep = Annotated[
     AdvancedDerivativesService, Depends(advanced_derivatives_service)
@@ -199,6 +220,7 @@ AdvancedDerivativesDep = Annotated[
 InstrumentServiceDep = Annotated[InstrumentService, Depends(instrument_service)]
 JobServiceDep = Annotated[JobService, Depends(job_service)]
 MarketDataServiceDep = Annotated[MarketDataService, Depends(market_data_service)]
+LiveMarketServiceDep = Annotated[LiveMarketDataService, Depends(live_market_service)]
 MicrostructureServiceDep = Annotated[
     MicrostructureApplicationService, Depends(microstructure_service)
 ]
