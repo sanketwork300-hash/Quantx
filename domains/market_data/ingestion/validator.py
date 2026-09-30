@@ -22,7 +22,11 @@ from decimal import Decimal
 from enum import StrEnum
 
 from domains.instruments.enums import OptionType
-from domains.market_data.ingestion.parser import ParsedRow
+from domains.market_data.ingestion.parser import NOT_AN_OPTION, ParsedRow
+
+#: What an exchange bhavcopy writes in the option-type column of a row that is
+#: a future. NSE's legacy F&O bhavcopy uses ``XX``.
+NON_OPTION_TOKENS: frozenset[str] = frozenset({"XX", "FUT", "FUTURE", "FUTURES"})
 
 
 class RejectionReason(StrEnum):
@@ -32,6 +36,9 @@ class RejectionReason(StrEnum):
     MISSING_OPTION_TYPE = "MISSING_OPTION_TYPE"
     NO_PRICE_FIELDS = "NO_PRICE_FIELDS"
     SYMBOL_MISMATCH = "SYMBOL_MISMATCH"
+    #: The row is a future listed beside the options. Read correctly, and not
+    #: a quote this pipeline takes.
+    NOT_AN_OPTION = "NOT_AN_OPTION"
     UNPARSEABLE_ROW = "UNPARSEABLE_ROW"
     INSTRUMENT_UNRESOLVED = "INSTRUMENT_UNRESOLVED"
     INSTRUMENT_AMBIGUOUS = "INSTRUMENT_AMBIGUOUS"
@@ -81,6 +88,15 @@ class OptionChainRowValidator:
 
     def validate(self, row: ParsedRow) -> ValidatedOptionRow | RejectedRow:
         values = row.values
+
+        # Asked first: a future carries a strike of zero or none at all, and
+        # would otherwise be reported as a strike the reading got wrong.
+        if values.get("option_type") is NOT_AN_OPTION:
+            return self._reject(
+                row,
+                RejectionReason.NOT_AN_OPTION,
+                "The option-type column marks this row as a future, not an option.",
+            )
 
         strike = values.get("strike")
         if strike is None:

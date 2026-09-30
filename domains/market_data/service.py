@@ -27,11 +27,24 @@ from domains.market_data.ingestion.layout import (
 from domains.market_data.ingestion.layout import (
     detect as detect_layout,
 )
-from domains.market_data.ingestion.parser import TabularParser
+from domains.market_data.ingestion.parser import DateOrder, DateReading, TabularParser
 from domains.market_data.ingestion.pipeline import (
     IngestionSummary,
     OptionChainIngestionPipeline,
     OptionChainIngestionRequest,
+)
+from domains.market_data.ingestion.reading import (
+    FieldReading,
+    ReadingVerdict,
+    SampleRow,
+    assess_sample,
+    describe,
+)
+from domains.market_data.ingestion.reading import (
+    obstacle as reading_obstacle,
+)
+from domains.market_data.ingestion.reading import (
+    sample as sample_rows,
 )
 from domains.market_data.live_chain import LiveChainCaptureSummary
 from domains.market_data.open_interest import ChainRow
@@ -75,29 +88,52 @@ class UploadRejected(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class UploadPreview:
+    """How a file was read, and whether that reading worked.
+
+    The report, not a form to fill in. The file is read first and the reading is
+    shown; correcting it is the exception rather than the entry price, because
+    the ordinary user downloaded a chain from an exchange and has nothing to say
+    about its columns.
+
+    ``sample`` carries the file's first rows *in file order, failures included*.
+    A sample built from the rows that parsed is the misleading artefact this
+    replaces: it looks correct however badly the file was read, because the rows
+    that would prove otherwise are exactly the ones it leaves out.
+    """
+
     upload_id: uuid.UUID
     headers: list[str]
+    #: Field by field: which column it was read from, and whether that column
+    #: was worked out from the file or named by the caller.
+    reading: tuple[FieldReading, ...]
+    #: Whether the sample could be read at all, by the same rule the commit path
+    #: applies to the whole file.
+    verdict: ReadingVerdict
     inferred_mapping: dict[str, str]
     applied_mapping: dict[str, str]
     missing_required: tuple[str, ...]
     unmapped_columns: tuple[str, ...]
-    sample_rows: list[dict]
-    parse_errors: list[dict]
+    sample: tuple[SampleRow, ...]
     #: How the file is arranged, and the evidence for that reading. A two-sided
-    #: chain cannot be described by a column mapping alone, so the user confirms
-    #: the layout here for the same reason they confirm the mapping.
+    #: chain cannot be described by a column mapping alone, so the layout is
+    #: reported here for the same reason the mapping is.
     detected_layout: LayoutDetection | None = None
+    #: How each column of numeric dates was read -- day first or month first --
+    #: and what settled it. Empty when no date in the file depends on the order.
+    date_readings: tuple[DateReading, ...] = ()
 
     def to_dict(self) -> dict:
         return {
             "upload_id": str(self.upload_id),
             "headers": self.headers,
+            "reading": [item.to_dict() for item in self.reading],
+            "verdict": self.verdict.to_dict(),
             "inferred_mapping": self.inferred_mapping,
             "applied_mapping": self.applied_mapping,
             "missing_required": list(self.missing_required),
             "unmapped_columns": list(self.unmapped_columns),
-            "sample_rows": self.sample_rows,
-            "parse_errors": self.parse_errors,
+            "sample": [row.to_dict() for row in self.sample],
+            "date_readings": [item.to_dict() for item in self.date_readings],
             "detected_layout": (
                 self.detected_layout.to_dict() if self.detected_layout is not None else None
             ),
@@ -244,6 +280,7 @@ class MarketDataService:
         mapping: ColumnMapping | None = None,
         limit: int | None = None,
         layout: TwoSidedLayout | None = None,
+        date_order: DateOrder | None = None,
     ) -> UploadPreview:
         """Show how the file would be read. Persists nothing.
 
@@ -255,7 +292,7 @@ class MarketDataService:
         commit.
         """
         data = await self.read_upload(upload)
-        headers = TabularParser.read_headers(data)
+        headers = TabularParser.read_headers(data, OPTION_CHAIN_FIELDS)
 
         detection = detect_layout(data, filename=upload.original_filename)
         applied_layout = layout
@@ -277,6 +314,7 @@ class MarketDataService:
             applied,
             limit or self._settings.upload_preview_rows,
             layout=applied_layout,
+            date_order=date_order,
         )
         if applied_layout is not None:
             claimed = {
@@ -291,18 +329,36 @@ class MarketDataService:
         else:
             unmapped = applied.unmapped_columns(parse_result.headers)
 
+        rows = sample_rows(parse_result)
         return UploadPreview(
             upload_id=upload.id,
             headers=parse_result.headers or file_headers,
+            reading=describe(
+                OPTION_CHAIN_FIELDS,
+                applied,
+                parse_result.headers or file_headers,
+                supplied=mapping,
+                layout=applied_layout,
+                detected_layout=detection.two_sided,
+                # Only the filename's own suggestion may be attributed to the
+                # filename. An expiry the caller replaced is theirs, and saying
+                # otherwise would credit the file with a date it never carried.
+                expiry_source=(
+                    detection.suggestion_source
+                    if applied_layout is not None
+                    and applied_layout.expiry == detection.suggested_expiry
+                    else None
+                ),
+            ),
+            verdict=assess_sample(
+                rows, missing_required=missing, obstacle=reading_obstacle(parse_result)
+            ),
+            date_readings=parse_result.date_readings,
             inferred_mapping=inferred.to_dict(),
             applied_mapping=applied.to_dict(),
             missing_required=missing,
             unmapped_columns=unmapped,
-            sample_rows=[
-                {key: _jsonable(value) for key, value in row.values.items()}
-                for row in parse_result.rows
-            ],
-            parse_errors=[error.to_dict() for error in parse_result.errors],
+            sample=rows,
             detected_layout=(
                 replace(detection, two_sided=applied_layout)
                 if applied_layout is not None

@@ -36,7 +36,7 @@ function EffectTag({ effect }: { effect: string }) {
 function ExplanationPanel({ anomaly }: { anomaly: SurfaceAnomaly }) {
   return (
     <div className="card" style={{ width: 420, flex: "0 0 420px" }}>
-      <h3 style={{ marginTop: 0 }}>Why was this flagged?</h3>
+      <h2 style={{ marginTop: 0 }}>Why was this flagged?</h2>
       <p className="mono">
         {anomaly.expiry} {anomaly.strike} {anomaly.option_type}
       </p>
@@ -120,7 +120,7 @@ function ExplanationPanel({ anomaly }: { anomaly: SurfaceAnomaly }) {
         </tbody>
       </table>
 
-      <h3>What went into that confidence</h3>
+      <h2>What went into that confidence</h2>
       <ul className="reasons">
         {anomaly.explanation.map((entry, index) => (
           <li key={index} style={{ marginBottom: 6 }}>
@@ -142,7 +142,7 @@ function ExplanationPanel({ anomaly }: { anomaly: SurfaceAnomaly }) {
 function HistoryPanel({ history }: { history: SurfaceHistory }) {
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>Surface history</h3>
+      <h2 style={{ marginTop: 0 }}>Surface history</h2>
       <p className="muted" style={{ marginTop: 0 }}>
         Where today&apos;s shape sits against this underlying&apos;s own past, at
         fixed tenors so surfaces stay comparable as expiries roll.
@@ -287,7 +287,7 @@ export default function ScannerPage() {
 
   return (
     <>
-      <h2>Surface scanner</h2>
+      <h1>Surface scanner</h1>
       <p className="subtitle">
         Observed implied volatilities compared against the fitted reference
         surface. What this produces is a measured difference, the scale of
@@ -302,7 +302,7 @@ export default function ScannerPage() {
       <ErrorBanner error={run.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Run a scan</h3>
+        <h2 style={{ marginTop: 0 }}>Run a scan</h2>
         <div className="row">
           <div className="field" style={{ marginBottom: 0 }}>
             <label htmlFor="minz">Minimum standardised deviation</label>
@@ -412,7 +412,7 @@ export default function ScannerPage() {
               <ExplanationPanel anomaly={selected} />
             ) : (
               <div className="card" style={{ width: 420, flex: "0 0 420px" }}>
-                <h3 style={{ marginTop: 0 }}>Select a row</h3>
+                <h2 style={{ marginTop: 0 }}>Select a row</h2>
                 <p className="muted">
                   Every flagged quote can account for itself: what deviated, by
                   how much, relative to which reference, against what scale, and

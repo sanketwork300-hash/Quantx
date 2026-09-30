@@ -113,7 +113,7 @@ export default function DatasetPage({
 
   return (
     <>
-      <h2>{detail?.name ?? "Dataset"}</h2>
+      <h1>{detail?.name ?? "Dataset"}</h1>
       <p className="subtitle">
         {detail?.kind} · {detail?.rows.snapshots.kept ?? 0} snapshots ·{" "}
         {detail?.rows.events.kept ?? 0} events ·{" "}
@@ -130,7 +130,7 @@ export default function DatasetPage({
       />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>What this dataset can answer</h3>
+        <h2 style={{ marginTop: 0 }}>What this dataset can answer</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Decided once, when the data was imported, and consulted before anything
           runs. A refusal names what was missing and shows the numbers it was
@@ -157,7 +157,7 @@ export default function DatasetPage({
 
       {/* ------------------------------------------------------- book measures */}
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Book measures</h3>
+        <h2 style={{ marginTop: 0 }}>Book measures</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Percentiles rather than a mean and a standard deviation: a session of
           books is not normal, and a handful of instants around the auction own
@@ -214,7 +214,7 @@ export default function DatasetPage({
               </table>
             </div>
 
-            <h3>Cost of taking the displayed book</h3>
+            <h2>Cost of taking the displayed book</h2>
             <div className="table-wrap" style={{ maxHeight: 220 }}>
               <table>
                 <thead>
@@ -256,7 +256,7 @@ export default function DatasetPage({
 
       {/* ---------------------------------------------------------- intensity */}
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Arrival intensity</h3>
+        <h2 style={{ marginTop: 0 }}>Arrival intensity</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           A constant rate, and a self-exciting model that has to beat it on
           events it was not fitted on. Both are shown whatever the verdict,
@@ -382,7 +382,7 @@ export default function DatasetPage({
 
       {/* -------------------------------------------------------------- queue */}
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Queue outlook</h3>
+        <h2 style={{ marginTop: 0 }}>Queue outlook</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           The answer is a range, and the range is the answer. Its two ends differ
           only in whether cancellations at the level are assumed to remove size
@@ -475,7 +475,7 @@ export default function DatasetPage({
               </table>
             </div>
 
-            <h3>What this assumes</h3>
+            <h2>What this assumes</h2>
             <ul className="reasons">
               {queue.results.assumptions.map((assumption) => (
                 <li key={assumption}>{assumption}</li>
@@ -493,7 +493,7 @@ export default function DatasetPage({
         (rejections.data.snapshot_rejections.length > 0 ||
           rejections.data.event_rejections.length > 0) && (
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Rows that did not make it</h3>
+            <h2 style={{ marginTop: 0 }}>Rows that did not make it</h2>
             <p className="muted" style={{ marginTop: 0 }}>
               The complete list, not a sample. Every one carries the row number
               it had in your own file.

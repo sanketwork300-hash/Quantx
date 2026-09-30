@@ -87,9 +87,9 @@ function BranchShell({
   if (!branch) return null;
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>
+      <h2 style={{ marginTop: 0 }}>
         {name} <StatusTag status={branch.status} />
-      </h3>
+      </h2>
       <p className="muted" style={{ marginTop: 0 }}>
         {BRANCH_QUESTION[name]}
       </p>
@@ -230,7 +230,7 @@ export default function OrderAnalysisPage() {
 
   return (
     <>
-      <h2>Order analysis</h2>
+      <h1>Order analysis</h1>
       <p className="subtitle">
         One proposed order, five engines, one market snapshot. The
         current-to-proposed differences below are attributable to the order
@@ -242,7 +242,7 @@ export default function OrderAnalysisPage() {
       <ErrorBanner error={run.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>The order</h3>
+        <h2 style={{ marginTop: 0 }}>The order</h2>
         <div className="row">
           <div className="field" style={{ flex: 2 }}>
             <label htmlFor="portfolio">Portfolio</label>
@@ -322,7 +322,7 @@ export default function OrderAnalysisPage() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>What the platform does not hold</h3>
+        <h2 style={{ marginTop: 0 }}>What the platform does not hold</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Average daily volume and volatility are yours to supply. Left empty,
           the impact half of the cost estimate is reported as absent rather than
@@ -402,10 +402,10 @@ export default function OrderAnalysisPage() {
       {envelope && results && (
         <>
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>
+            <h2 style={{ marginTop: 0 }}>
               {results.order.canonical_key} · {results.order.side}{" "}
               {results.order.quantity} <StatusTag status={envelope.status} />
-            </h3>
+            </h2>
             <p className="muted" style={{ marginTop: 0 }}>
               {results.counts.ok} of {BRANCHES.length} branches answered.
             </p>
@@ -437,16 +437,16 @@ export default function OrderAnalysisPage() {
           </div>
 
           <BranchShell name="RISK" branch={results.branches.RISK}>
-            <h4>Greeks</h4>
+            <h3>Greeks</h3>
             <Movements
               movements={results.branches.RISK.results?.greeks.movements ?? []}
             />
             {results.branches.RISK.results?.value_at_risk ? (
               <>
-                <h4>
+                <h3>
                   Value at risk and expected shortfall (
                   {results.branches.RISK.results.value_at_risk.method})
-                </h4>
+                </h3>
                 <Movements
                   movements={results.branches.RISK.results.value_at_risk.movements}
                 />
@@ -458,9 +458,9 @@ export default function OrderAnalysisPage() {
             )}
             {results.branches.RISK.results?.stress && (
               <>
-                <h4>
+                <h3>
                   Scenario — {results.branches.RISK.results.stress.scenario}
-                </h4>
+                </h3>
                 <Movements movements={results.branches.RISK.results.stress.movements} />
               </>
             )}

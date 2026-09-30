@@ -156,7 +156,7 @@ export default function SmilePage() {
 
   return (
     <>
-      <h2>Implied volatility</h2>
+      <h1>Implied volatility</h1>
       <p className="subtitle">
         Market-implied volatility solved from observed prices, against a forward
         estimated from those same prices. No fitted surface exists yet — that is
@@ -174,7 +174,7 @@ export default function SmilePage() {
       <ErrorBanner error={analyse.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Run the analysis</h3>
+        <h2 style={{ marginTop: 0 }}>Run the analysis</h2>
         <div className="row">
           <div className="field">
             <label htmlFor="rate">Risk-free rate (continuously compounded)</label>
@@ -231,7 +231,7 @@ export default function SmilePage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Smile</h3>
+            <h2 style={{ marginTop: 0 }}>Smile</h2>
             <SmileChart
               slices={slices}
               onSelectPoint={(id) => {
@@ -245,14 +245,14 @@ export default function SmilePage() {
 
           {slices.map((slice) => (
             <div className="card" key={slice.expiry}>
-              <h3 style={{ marginTop: 0 }}>
+              <h2 style={{ marginTop: 0 }}>
                 {slice.expiry}
                 {slice.settlement_time_assumed && (
                   <span className="tag info" style={{ marginLeft: 8 }}>
                     settlement time assumed
                   </span>
                 )}
-              </h3>
+              </h2>
 
               {slice.reason ? (
                 <div className="banner warn">
@@ -279,12 +279,12 @@ export default function SmilePage() {
                     />
                   </div>
 
-                  <h3>Forward</h3>
+                  <h2>Forward</h2>
                   <ForwardPanel slice={slice} />
 
                   {Object.keys(slice.solve_failures).length > 0 && (
                     <>
-                      <h3>Quotes with no implied volatility</h3>
+                      <h2>Quotes with no implied volatility</h2>
                       <ul className="reasons">
                         {Object.entries(slice.solve_failures).map(([code, count]) => (
                           <li key={code}>
@@ -295,7 +295,7 @@ export default function SmilePage() {
                     </>
                   )}
 
-                  <h3>Points</h3>
+                  <h2>Points</h2>
                   <div className="table-wrap" style={{ maxHeight: 340 }}>
                     <table>
                       <thead>
@@ -348,9 +348,9 @@ export default function SmilePage() {
 
           {selected && (
             <div className="card">
-              <h3 style={{ marginTop: 0 }}>
+              <h2 style={{ marginTop: 0 }}>
                 How well determined is this implied volatility?
-              </h3>
+              </h2>
               <p className="mono">
                 {selected.expiry} {selected.strike} {selected.option_type}
               </p>

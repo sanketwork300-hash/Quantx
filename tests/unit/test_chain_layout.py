@@ -24,6 +24,7 @@ from domains.market_data.ingestion.layout import (
     TwoSidedLayout,
     detect,
     filename_hints,
+    read_filename,
     split,
 )
 from domains.market_data.ingestion.parser import TabularParser
@@ -249,12 +250,33 @@ class TestFilenameHints:
             ("option-chain-ED-NIFTY-15-Sep-2026.csv", date(2026, 9, 15)),
             ("option-chain-ED-NIFTY-15-Sep-2026 (1).csv", date(2026, 9, 15)),
             ("chain_BANKNIFTY_2026-09-15.csv", date(2026, 9, 15)),
+            ("NIFTY_15SEP2026.csv", date(2026, 9, 15)),
+            ("nifty-15-Sept-2026.csv", date(2026, 9, 15)),
+            ("nifty 15 September 2026.csv", date(2026, 9, 15)),
+            ("BANKNIFTY 28-10-2026.csv", date(2026, 10, 28)),
+            ("NIFTY26OCT24000CE.csv", None),
             ("nifty.csv", None),
             (None, None),
         ],
     )
     def test_an_expiry_is_read_from_the_filename_when_one_is_there(self, filename, expected):
         assert filename_hints(filename)[0] == expected
+
+    def test_two_dates_do_not_say_which_is_the_expiry(self):
+        """The first used to be taken, and it was the snapshot date."""
+        hint = read_filename("NIFTY-2026-09-30-snapshot-exp-2026-10-29.csv")
+        assert hint.expiry is None
+        assert "more than one date (2026-09-30, 2026-10-29)" in hint.note
+
+    def test_a_numeric_date_that_reads_two_ways_suggests_nothing(self):
+        hint = read_filename("BANKNIFTY 05-10-2026.csv")
+        assert hint.expiry is None
+        assert "day-month or month-day" in hint.note
+
+    def test_why_nothing_was_suggested_is_part_of_the_evidence(self):
+        detection = detect(nse_bytes(), filename="NIFTY-2026-09-30-exp-2026-10-29.csv")
+        assert detection.suggested_expiry is None
+        assert any("more than one date" in line for line in detection.evidence)
 
     def test_the_symbol_next_to_the_date_is_offered_too(self):
         assert filename_hints("option-chain-ED-NIFTY-15-Sep-2026.csv")[1] == "NIFTY"
@@ -347,3 +369,83 @@ class TestReadingAFileTheCallerDidNotDescribe:
         plan = self.resolve(b"a,b,c\n1,2,3\n", {}, "chain-15-Sep-2026.csv")
         assert not plan.mapping_inferred
         assert plan.mapping.missing_required(OPTION_CHAIN_FIELDS)
+
+
+class TestHeadersThatNameTheirOwnSide:
+    """``Call LTP`` and ``Put LTP`` say which side they are; position need not."""
+
+    FILE = (
+        b"Call OI,Call LTP,Call Bid,Call Ask,Strike,Put Bid,Put Ask,Put LTP,Put OI\n"
+        b"100,150,149,151,24000,20,21,20.5,120\n"
+    )
+
+    def test_the_file_is_read_as_two_sided(self):
+        detection = detect(self.FILE)
+        assert detection.layout is ChainLayout.TWO_SIDED
+        assert detection.two_sided.strike_column == 4
+        assert detection.two_sided.call_columns == {
+            "open_interest": 0,
+            "last_price": 1,
+            "bid_price": 2,
+            "ask_price": 3,
+        }
+        assert detection.two_sided.put_columns == {
+            "bid_price": 5,
+            "ask_price": 6,
+            "last_price": 7,
+            "open_interest": 8,
+        }
+
+    def test_the_name_is_believed_over_the_position(self):
+        """Puts written left of the strike are still the puts."""
+        data = b"PE LTP,PE OI,Strike Price,CE LTP,CE OI\n20.5,120,24000,150,100\n"
+        layout = detect(data).two_sided
+        assert layout.put_columns == {"last_price": 0, "open_interest": 1}
+        assert layout.call_columns == {"last_price": 3, "open_interest": 4}
+
+    @pytest.mark.parametrize(
+        "header",
+        ["C_LTP,C_OI,STRIKE,P_LTP,P_OI", "LTP Call,OI Call,Strike,LTP Put,OI Put"],
+    )
+    def test_other_ways_of_naming_a_side(self, header):
+        layout = detect(f"{header}\n150,100,24000,20.5,120\n".encode()).two_sided
+        assert layout.call_columns == {"last_price": 0, "open_interest": 1}
+        assert layout.put_columns == {"last_price": 3, "open_interest": 4}
+
+    def test_the_evidence_says_the_sides_were_named(self):
+        blob = " ".join(detect(self.FILE).evidence)
+        assert "name their own side" in blob
+        assert "'Call OI'" in blob
+
+    def test_each_side_keeps_its_own_prices(self):
+        layout = replace(detect(self.FILE).two_sided, expiry=EXPIRY)
+        records, headers = split(self.FILE, layout)
+        parser = TabularParser(OPTION_CHAIN_FIELDS, max_rows=10)
+        call, put = parser.parse_records(records, headers, layout.identity_mapping()).rows
+        assert call.values["option_type"] is OptionType.CALL
+        assert call.values["last_price"] == Decimal("150")
+        assert put.values["last_price"] == Decimal("20.5")
+
+    def test_a_word_that_merely_starts_with_a_side_letter_is_not_a_side(self):
+        """``Price`` is not a put, and ``Close`` is not a call."""
+        assert detect(b"Close,Price,Strike\n1,2,24000\n").layout is ChainLayout.LONG
+
+
+class TestALongFormFileWithLinesAboveItsHeader:
+    FILE = (
+        b"NIFTY option chain as on 30-Sep-2026\n"
+        b"\n"
+        b"strike,option_type,expiry,bid,ask\n"
+        b"24000,CE,2026-10-29,150,151\n"
+    )
+
+    def test_the_header_is_found(self):
+        detection = detect(self.FILE)
+        assert detection.layout is ChainLayout.LONG
+        assert detection.header_row == 2
+        assert detection.headers == ("strike", "option_type", "expiry", "bid", "ask")
+        assert any("Row 3 is the header" in line for line in detection.evidence)
+
+    def test_a_semicolon_separated_chain_is_split_into_its_columns(self):
+        data = b"strike;option_type;expiry;bid;ask\n24000;CE;2026-10-29;150;151\n"
+        assert detect(data).headers == ("strike", "option_type", "expiry", "bid", "ask")

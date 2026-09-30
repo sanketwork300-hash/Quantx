@@ -133,7 +133,7 @@ export default function ResearchPage() {
 
   return (
     <>
-      <h2>Research</h2>
+      <h1>Research</h1>
       <p className="subtitle">
         Backtests over warehouse history. A strategy here produces a target
         weight for a <em>simulated</em> book — nothing on this page evaluates a
@@ -150,7 +150,7 @@ export default function ResearchPage() {
           runIt.mutate();
         }}
       >
-        <h3 style={{ marginTop: 0 }}>Run a backtest</h3>
+        <h2 style={{ marginTop: 0 }}>Run a backtest</h2>
         <div className="row">
           <div className="field">
             <label htmlFor="instrument">Instrument</label>
@@ -235,7 +235,7 @@ export default function ResearchPage() {
       </form>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Experiments</h3>
+        <h2 style={{ marginTop: 0 }}>Experiments</h2>
         {experiments.data?.length ? (
           <table>
             <thead>
@@ -265,11 +265,11 @@ export default function ResearchPage() {
 
       {detail.data ? (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>
+          <h2 style={{ marginTop: 0 }}>
             {detail.data.name} <CostBadge gross={detail.data.gross_of_costs} />
-          </h3>
+          </h2>
 
-          <h4>What the run assumed</h4>
+          <h3>What the run assumed</h3>
           <table>
             <tbody>
               <tr>
@@ -312,7 +312,7 @@ export default function ResearchPage() {
             </tbody>
           </table>
 
-          <h4>Performance</h4>
+          <h3>Performance</h3>
           <p className="muted">
             Annualised on {num(detail.data.metrics.periods_per_year, 1)} bars per
             year, measured from the data rather than assumed.{" "}
@@ -364,7 +364,7 @@ export default function ResearchPage() {
             </tbody>
           </table>
 
-          <h4>Where the money came from</h4>
+          <h3>Where the money came from</h3>
           <table>
             <tbody>
               <tr>
@@ -416,7 +416,7 @@ export default function ResearchPage() {
 
           {detail.data.warnings.length ? (
             <>
-              <h4>What the run wants you to know</h4>
+              <h3>What the run wants you to know</h3>
               {detail.data.warnings.map((warning, index) => (
                 <div key={`${warning.code}-${index}`} style={{ marginBottom: 6 }}>
                   <span className="mono">{warning.code}</span>

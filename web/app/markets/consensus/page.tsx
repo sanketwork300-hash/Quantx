@@ -70,7 +70,7 @@ export default function ConsensusPage() {
 
   return (
     <>
-      <h2>Model consensus</h2>
+      <h1>Model consensus</h1>
       <p className="subtitle">
         One contract, priced by every model the platform has. Black-Scholes
         assumes a volatility the smile says does not exist; the local-volatility
@@ -85,7 +85,7 @@ export default function ConsensusPage() {
       <ErrorBanner error={price.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Price a contract</h3>
+        <h2 style={{ marginTop: 0 }}>Price a contract</h2>
         <div className="row">
           <div className="field" style={{ minWidth: 340 }}>
             <label htmlFor="instrument">Option instrument id</label>
@@ -129,7 +129,7 @@ export default function ConsensusPage() {
 
       {job.data && job.data.status !== "COMPLETED" && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Job</h3>
+          <h2 style={{ marginTop: 0 }}>Job</h2>
           <p>{job.data.status}</p>
           <div className="bar">
             <span style={{ width: `${Math.round(job.data.progress * 100)}%` }} />
@@ -143,7 +143,7 @@ export default function ConsensusPage() {
       {payload && (
         <>
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Where the models landed</h3>
+            <h2 style={{ marginTop: 0 }}>Where the models landed</h2>
             <DispersionBar
               values={payload.values}
               referenceValue={payload.reference_value}
@@ -184,7 +184,7 @@ export default function ConsensusPage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Each model</h3>
+            <h2 style={{ marginTop: 0 }}>Each model</h2>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -217,7 +217,7 @@ export default function ConsensusPage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Why the confidence is what it is</h3>
+            <h2 style={{ marginTop: 0 }}>Why the confidence is what it is</h2>
             <ul className="reasons">
               {payload.confidence.contributions.map((contribution) => (
                 <li key={contribution.name}>
@@ -239,7 +239,7 @@ export default function ConsensusPage() {
 
           {payload.higher_order_greeks && (
             <div className="card">
-              <h3 style={{ marginTop: 0 }}>Higher-order Greeks</h3>
+              <h2 style={{ marginTop: 0 }}>Higher-order Greeks</h2>
               <div className="grid">
                 <Metric
                   label="Vanna (per vol point)"
@@ -262,7 +262,7 @@ export default function ConsensusPage() {
       )}
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Previous runs</h3>
+        <h2 style={{ marginTop: 0 }}>Previous runs</h2>
         <ErrorBanner error={runs.error} />
         <div className="table-wrap" style={{ maxHeight: 320 }}>
           <table>

@@ -142,7 +142,7 @@ export default function LivePage() {
 
   return (
     <>
-      <h2>Live market</h2>
+      <h1>Live market</h1>
       <p className="subtitle">
         Prices as the feed last delivered them, each with its own age. Nothing
         here is a recommendation and nothing is smoothed — an absent value is
@@ -153,7 +153,7 @@ export default function LivePage() {
 
       {status.data?.unavailable_reason ? (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>The feed is not delivering</h3>
+          <h2 style={{ marginTop: 0 }}>The feed is not delivering</h2>
           <p className="muted">{status.data.unavailable_reason}</p>
         </div>
       ) : null}
@@ -161,14 +161,14 @@ export default function LivePage() {
       {status.data ? (
         <div className="card">
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <h3 style={{ margin: 0 }}>
+            <h2 style={{ margin: 0 }}>
               {status.data.provider}{" "}
               {status.data.health ? (
                 <StatusTag status={status.data.health.status} />
               ) : (
                 <span className="tag bad">no worker</span>
               )}
-            </h3>
+            </h2>
             <button
               className="secondary"
               disabled={refresh.isPending}
@@ -221,7 +221,7 @@ export default function LivePage() {
       ) : null}
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Watch</h3>
+        <h2 style={{ marginTop: 0 }}>Watch</h2>
         {instruments.data?.items.length ? (
           <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
             {instruments.data.items.map((instrument) => (

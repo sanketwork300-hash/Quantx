@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import pytest
 
-AS_OF = "2026-09-24T09:20:00Z"
+#: Before the expiry the filename carries, because that is the only arrangement
+#: a real download has. Dating a chain after its own expiry makes every quote
+#: `OPTION_EXPIRED`, which is a different test from this one.
+AS_OF = "2026-09-01T09:20:00Z"
 FILENAME = "option-chain-ED-NIFTY-15-Sep-2026 (1).csv"
 
 _HEADER = (
@@ -98,6 +101,71 @@ async def ingested(client, auth_header, previewed):
     return result.json()["result"]
 
 
+class TestAChainThatOpensOnQuietStrikes:
+    """A real download starts at strikes nobody quotes, on either side.
+
+    The defect this covers: the preview sample held only those rows, was judged
+    by the whole-file rule "nothing became a quote", and the file was refused --
+    in the preview, which disabled the ingest button, and again at submission --
+    although the quotes further down read perfectly well.
+    """
+
+    QUIET = "".join(
+        f',-,-,-,-,-,-,-,-,-,-,"{strike:,}.00",-,-,-,-,-,-,-,-,-,-,\r\n'
+        for strike in range(15000, 18000, 50)
+    )
+    FILE = (_HEADER + QUIET + _ROWS).encode()
+
+    async def test_the_preview_does_not_call_it_unreadable(self, client, auth_header):
+        record = await upload(client, auth_header, data=self.FILE)
+        seen = await preview(client, auth_header, record["id"], limit=25)
+        verdict = seen["verdict"]
+        assert verdict["readable"] is True
+        assert verdict["rows_read"] == 0
+        assert verdict["rows_empty"] == 50
+        assert verdict["source_rows"] == 25
+        assert "first 25 row(s)" in verdict["message"]
+
+    async def test_it_is_ingested_with_nothing_said_about_it(self, client, auth_header):
+        record = await upload(client, auth_header, data=self.FILE)
+        response = await client.post(
+            f"/uploads/{record['id']}/ingest",
+            headers={"Authorization": auth_header},
+            json={
+                "underlying": {"symbol": "NIFTY", "exchange": "NSE"},
+                "as_of_timestamp": AS_OF,
+            },
+        )
+        assert response.status_code == 202, response.text
+        job_id = response.json()["job_id"]
+        job = await client.get(f"/jobs/{job_id}", headers={"Authorization": auth_header})
+        assert job.json()["status"] == "COMPLETED", job.text
+        result = await client.get(f"/jobs/{job_id}/result", headers={"Authorization": auth_header})
+        counts = result.json()["result"]["results"]["counts"]
+        assert counts["kept"] > 0
+        assert counts["rejected"] == 120  # the quiet strikes, once per side
+
+    async def test_a_file_of_nothing_but_quiet_strikes_is_refused_by_the_worker(
+        self, client, auth_header
+    ):
+        """Only the whole file can say nothing was there, and it still does."""
+        record = await upload(client, auth_header, data=(_HEADER + self.QUIET).encode())
+        response = await client.post(
+            f"/uploads/{record['id']}/ingest",
+            headers={"Authorization": auth_header},
+            json={
+                "underlying": {"symbol": "NIFTY", "exchange": "NSE"},
+                "as_of_timestamp": AS_OF,
+            },
+        )
+        assert response.status_code == 202, response.text
+        job = await client.get(
+            f"/jobs/{response.json()['job_id']}", headers={"Authorization": auth_header}
+        )
+        assert job.json()["status"] == "FAILED"
+        assert job.json()["error"]["details"]["code"] == "NO_ROW_COULD_BE_READ"
+
+
 class TestThePreviewExplainsTheFile:
     async def test_the_layout_is_detected_rather_than_the_banner_read_as_a_header(self, previewed):
         _, seen = previewed
@@ -148,8 +216,34 @@ class TestThePreviewExplainsTheFile:
 
     async def test_the_sample_shows_both_sides_of_a_strike(self, previewed):
         _, seen = previewed
-        sides = [row["option_type"] for row in seen["sample_rows"]]
+        sides = [row["values"]["option_type"] for row in seen["sample"]]
         assert sides[:2] == ["CALL", "PUT"]
+
+    async def test_the_side_is_reported_as_position_rather_than_a_column(self, previewed):
+        """No column in such a file says call or put; the block it sits in does."""
+        _, seen = previewed
+        side = next(item for item in seen["reading"] if item["field"] == "option_type")
+        assert side["source"] == "IMPLIED_BY_POSITION"
+        assert side["columns"] == []
+
+    async def test_each_price_field_names_its_call_and_put_column(self, previewed):
+        _, seen = previewed
+        bid = next(item for item in seen["reading"] if item["field"] == "bid_price")
+        sides = {column["side"]: column["index"] for column in bid["columns"]}
+        assert set(sides) == {"CALL", "PUT"}
+        assert sides["CALL"] < sides["PUT"], "calls sit to the left of the strike"
+
+    async def test_the_expiry_says_it_was_not_read_from_the_file(self, previewed):
+        _, seen = previewed
+        expiry = next(item for item in seen["reading"] if item["field"] == "expiry")
+        assert expiry["source"] == "STATED_SEPARATELY"
+        assert "no expiry column" in expiry["detail"]
+        assert "filename" in expiry["detail"]
+
+    async def test_the_reading_is_reported_as_detected_not_as_the_users_choice(self, previewed):
+        _, seen = previewed
+        strike = next(item for item in seen["reading"] if item["field"] == "strike")
+        assert strike["source"] == "DETECTED_COLUMN"
 
     async def test_columns_that_were_ignored_are_named(self, previewed):
         _, seen = previewed
@@ -317,3 +411,55 @@ class TestTheFileIsReadWithoutBeingDescribed:
         )
         assert response.status_code == 422, response.text
         assert response.json()["code"] == "LAYOUT_EXPIRY_REQUIRED"
+
+
+class TestTheExchangeExportSupportsTheRestOfThePlatform:
+    """The whole point of ingesting it: a downloaded chain has to be usable.
+
+    This exercises the path the web UI actually takes -- nothing said about the
+    columns, and no underlying price, because a two-sided export has no spot
+    column. The forward is recovered from put-call parity on the quotes
+    themselves, so the absence of a spot is not the blocker it looks like.
+    """
+
+    @pytest.fixture
+    async def snapshot_id(self, client, auth_header):
+        record = await upload(client, auth_header)
+        response = await client.post(
+            f"/uploads/{record['id']}/ingest",
+            headers={"Authorization": auth_header},
+            json={
+                "kind": "OPTION_CHAIN",
+                "underlying": {"symbol": "NIFTY", "exchange": "NSE", "currency": "INR"},
+                "as_of_timestamp": AS_OF,
+                "column_mapping": {},
+                "contract": {"tick_size": "0.05", "lot_size": "1", "expiry_time_utc": "10:00:00"},
+            },
+        )
+        assert response.status_code == 202, response.text
+        job_id = response.json()["job_id"]
+        result = await client.get(f"/jobs/{job_id}/result", headers={"Authorization": auth_header})
+        return result.json()["result"]["results"]["snapshot_id"]
+
+    async def test_implied_volatility_solves_without_a_spot_column(
+        self, client, auth_header, snapshot_id
+    ):
+        accepted = await client.post(
+            f"/derivatives/chains/{snapshot_id}/analyze",
+            headers={"Authorization": auth_header},
+            json={
+                "risk_free_rate": 0.065,
+                "dividend_yield": 0.0,
+                "settlement_time_utc": "10:00:00",
+            },
+        )
+        assert accepted.status_code == 202, accepted.text
+        body = (
+            await client.get(
+                f"/jobs/{accepted.json()['job_id']}/result",
+                headers={"Authorization": auth_header},
+            )
+        ).json()["result"]
+        assert body["results"]["counts"]["solved"] > 0, body["results"]["slices"]
+        forward = body["results"]["slices"][0]["forward"]["selected"]
+        assert forward["method"] == "PUT_CALL_PARITY", "no spot column, so parity carries it"

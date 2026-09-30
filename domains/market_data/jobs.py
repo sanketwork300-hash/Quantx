@@ -17,6 +17,7 @@ from domains.jobs.handlers import register
 from domains.jobs.models import Job, JobType
 from domains.market_data.ingestion.column_mapping import ColumnMapping
 from domains.market_data.ingestion.layout import LayoutDetection, TwoSidedLayout
+from domains.market_data.ingestion.parser import DateOrder
 from domains.market_data.ingestion.pipeline import (
     ContractSpec,
     IngestionOptions,
@@ -93,6 +94,7 @@ async def ingest_option_chain(session: AsyncSession, job: Job) -> dict:
         risk_free_rate=payload.get("risk_free_rate"),
         dividend_yield=payload.get("dividend_yield"),
         filename=upload.original_filename,
+        date_order=DateOrder(payload["date_order"]) if payload.get("date_order") else None,
         upload_id=upload.id,
         dataset_digest=upload.sha256,
         provider="csv",

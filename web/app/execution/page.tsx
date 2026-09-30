@@ -206,7 +206,7 @@ export default function ExecutionPage() {
 
   return (
     <>
-      <h2>Execution</h2>
+      <h1>Execution</h1>
       <p className="subtitle">
         Transaction cost analysis on your own trade log. Every benchmark reports
         the window it covered, where the observations came from and how they were
@@ -216,7 +216,7 @@ export default function ExecutionPage() {
       <ErrorBanner error={doUpload.error ?? commit.error ?? analyse.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>1. Upload a trade log</h3>
+        <h2 style={{ marginTop: 0 }}>1. Upload a trade log</h2>
         <div className="row">
           <input
             type="file"
@@ -237,7 +237,7 @@ export default function ExecutionPage() {
 
       {preview && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>2. Confirm the mapping</h3>
+          <h2 style={{ marginTop: 0 }}>2. Confirm the mapping</h2>
           {missing.length > 0 && (
             <div className="banner warn">
               Required field(s) not mapped: {missing.join(", ")}
@@ -300,7 +300,7 @@ export default function ExecutionPage() {
 
       {preview && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>3. What the file resolved to</h3>
+          <h2 style={{ marginTop: 0 }}>3. What the file resolved to</h2>
           <div className="grid">
             <div>
               <div className="muted">Rows read</div>
@@ -331,7 +331,7 @@ export default function ExecutionPage() {
 
           {preview.invalid.length > 0 && (
             <>
-              <h3>Kept out, with the reason</h3>
+              <h2>Kept out, with the reason</h2>
               <div className="table-wrap" style={{ maxHeight: 240 }}>
                 <table>
                   <thead>
@@ -374,7 +374,7 @@ export default function ExecutionPage() {
       )}
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Analyse stored fills</h3>
+        <h2 style={{ marginTop: 0 }}>Analyse stored fills</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Groups fills into parent orders and benchmarks each one against arrival,
           decision, prevailing mid, interval TWAP, interval VWAP and close.
@@ -410,14 +410,14 @@ export default function ExecutionPage() {
 
           {analysis.reports.map((report) => (
             <div className="card" key={report.parent_order.key}>
-              <h3 style={{ marginTop: 0 }}>
+              <h2 style={{ marginTop: 0 }}>
                 {report.parent_order.symbol ?? "order"} · {report.parent_order.side}{" "}
                 {report.parent_order.filled_quantity} @{" "}
                 {money(report.parent_order.average_price)}
                 {report.parent_order.grouping_is_inferred ? (
                   <span className="tag warn">grouping inferred</span>
                 ) : null}
-              </h3>
+              </h2>
               <p className="muted" style={{ marginTop: 0 }}>
                 <span className="mono">{report.parent_order.canonical_key}</span> ·{" "}
                 {report.parent_order.fills} fill(s) over{" "}
@@ -432,7 +432,7 @@ export default function ExecutionPage() {
 
               {report.decomposition && (
                 <>
-                  <h3>Cost decomposition</h3>
+                  <h2>Cost decomposition</h2>
                   <div className="table-wrap">
                     <table>
                       <thead>
@@ -476,7 +476,7 @@ export default function ExecutionPage() {
       )}
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Stored reports</h3>
+        <h2 style={{ marginTop: 0 }}>Stored reports</h2>
         <div className="table-wrap" style={{ maxHeight: 320 }}>
           <table>
             <thead>

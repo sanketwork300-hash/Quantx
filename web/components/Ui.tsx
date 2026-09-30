@@ -41,7 +41,7 @@ export function Warnings({ warnings }: { warnings: AnalyticalWarning[] }) {
   if (!warnings.length) return null;
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>What the platform could not do</h3>
+      <h2 style={{ marginTop: 0 }}>What the platform could not do</h2>
       {warnings.map((warning) => (
         <div key={warning.code + warning.message} style={{ marginBottom: 8 }}>
           <SeverityTag severity={warning.severity} />{" "}
@@ -97,7 +97,7 @@ export function QualityBreakdown({ quality }: { quality: Quality }) {
       </table>
       {quality.flags.length > 0 && (
         <>
-          <h3>Flags</h3>
+          <h2>Flags</h2>
           <ul className="reasons">
             {quality.flags.map((flag, index) => (
               <li key={`${flag.code}-${index}`}>
@@ -118,7 +118,7 @@ export function ErrorBanner({ error }: { error: unknown }) {
   const problem = (error as { problem?: { code: string; detail: string | null } })
     .problem;
   return (
-    <div className="banner error">
+    <div className="banner error" role="alert">
       {problem ? (
         <>
           <span className="mono">{problem.code}</span> — {problem.detail}

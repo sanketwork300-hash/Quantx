@@ -109,7 +109,7 @@ export default function ImportPositionsPage() {
 
   return (
     <>
-      <h2>Import positions</h2>
+      <h1>Import positions</h1>
       <p className="subtitle">
         {portfolio.data ? `Into ${portfolio.data.name}. ` : ""}
         Every row is resolved against the instrument master before anything is
@@ -120,7 +120,7 @@ export default function ImportPositionsPage() {
       <ErrorBanner error={doUpload.error ?? reprocess.error ?? commit.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>1. Upload the position file</h3>
+        <h2 style={{ marginTop: 0 }}>1. Upload the position file</h2>
         <div className="row">
           <input
             type="file"
@@ -141,7 +141,7 @@ export default function ImportPositionsPage() {
 
       {preview && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>2. Confirm the mapping and defaults</h3>
+          <h2 style={{ marginTop: 0 }}>2. Confirm the mapping and defaults</h2>
           {missing.length > 0 && (
             <div className="banner warn">
               Required field(s) not mapped: {missing.join(", ")}
@@ -208,7 +208,7 @@ export default function ImportPositionsPage() {
 
       {preview && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>3. What the file resolved to</h3>
+          <h2 style={{ marginTop: 0 }}>3. What the file resolved to</h2>
           <div className="grid">
             <div>
               <div className="muted">Rows read</div>
@@ -236,7 +236,7 @@ export default function ImportPositionsPage() {
             </div>
           )}
 
-          <h3>Resolved</h3>
+          <h2>Resolved</h2>
           <div className="table-wrap" style={{ maxHeight: 320 }}>
             <table>
               <thead>
@@ -278,7 +278,7 @@ export default function ImportPositionsPage() {
 
           {preview.ambiguous.length > 0 && (
             <>
-              <h3>Ambiguous — you must resolve these</h3>
+              <h2>Ambiguous — you must resolve these</h2>
               <div className="table-wrap" style={{ maxHeight: 260 }}>
                 <table>
                   <thead>
@@ -310,7 +310,7 @@ export default function ImportPositionsPage() {
 
           {preview.invalid.length > 0 && (
             <>
-              <h3>Invalid — kept out, with the reason</h3>
+              <h2>Invalid — kept out, with the reason</h2>
               <div className="table-wrap" style={{ maxHeight: 260 }}>
                 <table>
                   <thead>
@@ -338,7 +338,7 @@ export default function ImportPositionsPage() {
 
       {preview && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>4. Commit</h3>
+          <h2 style={{ marginTop: 0 }}>4. Commit</h2>
           <label style={{ display: "block", marginBottom: 12 }}>
             <input
               type="checkbox"
@@ -362,7 +362,7 @@ export default function ImportPositionsPage() {
 
       {job.data && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Job</h3>
+          <h2 style={{ marginTop: 0 }}>Job</h2>
           <p>
             <span className="mono">{job.data.job_type}</span>{" "}
             <SeverityTag severity={job.data.status === "FAILED" ? "ERROR" : "INFO"} />{" "}

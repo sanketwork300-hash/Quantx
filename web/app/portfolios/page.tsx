@@ -34,7 +34,7 @@ export default function PortfoliosPage() {
 
   return (
     <>
-      <h2>Portfolios</h2>
+      <h1>Portfolios</h1>
       <p className="subtitle">
         A portfolio is valued against one market snapshot, so every number in a
         report comes from the same moment.
@@ -43,7 +43,7 @@ export default function PortfoliosPage() {
       <ErrorBanner error={create.error ?? portfolios.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>New portfolio</h3>
+        <h2 style={{ marginTop: 0 }}>New portfolio</h2>
         <div className="row">
           <div className="field">
             <label htmlFor="name">Name</label>
@@ -85,7 +85,7 @@ export default function PortfoliosPage() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Your portfolios</h3>
+        <h2 style={{ marginTop: 0 }}>Your portfolios</h2>
         {portfolios.data?.length === 0 && (
           <p className="muted">Nothing yet. Create one above, then import positions.</p>
         )}

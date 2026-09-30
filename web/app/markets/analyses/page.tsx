@@ -14,7 +14,7 @@ export default function AnalysesPage() {
 
   return (
     <>
-      <h2>Volatility analyses</h2>
+      <h1>Volatility analyses</h1>
       <p className="subtitle">
         Each run records the curve, day count and settlement time it used, so an
         older analysis can be reproduced rather than merely re-run.

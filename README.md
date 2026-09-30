@@ -73,8 +73,13 @@ schemas, the **data-quality engine**, and the **option-chain ingestion
 pipeline** -- which reads both a long-form file and the **two-sided layout**
 every exchange chain export uses, where calls sit left of the strike and puts
 right of it under the same repeated header names. A file uploaded with nothing
-said about it is read as it is actually arranged, with the evidence for that
-reading reported in the result and recorded in its provenance. Asynchronous
+said about it is read as it is actually arranged, and what comes back is the
+*reading*: which column every field was taken from, whether that was detected or
+supplied, and the file's first rows with the ones it could not read kept in
+rather than quietly omitted. Correcting a column is there for when the reading
+is wrong, not as the price of entry. A file that could not be read is refused
+outright, because a snapshot holding four quotes out of forty thousand is
+indistinguishable downstream from a market with four quotes in it. Asynchronous
 jobs.
 
 **Phase 1 — options MVP.**
@@ -508,7 +513,9 @@ make fixtures        # regenerates tests/data/*.csv deterministically
 ```
 
 Upload `tests/data/options_chain_clean.csv` at <http://localhost:3000/data>, or
-`options_chain_bad_quotes.csv` to watch the quality engine explain itself. Then
+`options_chain_bad_quotes.csv` to watch the quality engine explain itself — the
+second file's four unreadable rows appear in the sample with their reasons
+rather than being left out of it. Then
 open the chain and follow **Implied volatility** to solve forwards and a smile
 from it — the synthetic market was generated at a 6.5% rate with a 10:00 UTC
 settlement, and put-call parity will recover both from the quotes alone — then

@@ -93,7 +93,7 @@ export default function ConnectionsPage() {
 
   return (
     <>
-      <h2>Broker connections</h2>
+      <h1>Broker connections</h1>
       <p className="subtitle">
         Market data and trading credentials are granted through the provider’s
         own sign-in and stored encrypted against your account. Nothing here is
@@ -105,7 +105,7 @@ export default function ConnectionsPage() {
 
       {providers.data && !providers.data.credential_storage_ready ? (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Credential storage is not set up</h3>
+          <h2 style={{ marginTop: 0 }}>Credential storage is not set up</h2>
           <p className="muted">
             {providers.data.credential_storage_detail}
           </p>
@@ -122,10 +122,10 @@ export default function ConnectionsPage() {
         return (
           <div className="card" key={provider.provider}>
             <div className="row" style={{ justifyContent: "space-between" }}>
-              <h3 style={{ margin: 0 }}>
+              <h2 style={{ margin: 0 }}>
                 {label}{" "}
                 {connection ? <StatusTag status={connection.status} /> : null}
-              </h3>
+              </h2>
               <div className="row">
                 {provider.configured ? (
                   <button

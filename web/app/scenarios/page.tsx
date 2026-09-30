@@ -67,7 +67,7 @@ export default function ScenariosPage() {
 
   return (
     <>
-      <h2>Scenarios</h2>
+      <h1>Scenarios</h1>
       <p className="subtitle">
         A scenario is a named set of shocks. Applying one produces a shocked
         market and the portfolio is fully revalued against it.
@@ -76,7 +76,7 @@ export default function ScenariosPage() {
       <ErrorBanner error={create.error ?? derive.error ?? scenarios.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Where a scenario&rsquo;s numbers come from</h3>
+        <h2 style={{ marginTop: 0 }}>Where a scenario&rsquo;s numbers come from</h2>
         <ul className="reasons">
           <li>
             <span className="tag warn">hypothetical</span> — shipped templates.
@@ -96,7 +96,7 @@ export default function ScenariosPage() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Define a scenario</h3>
+        <h2 style={{ marginTop: 0 }}>Define a scenario</h2>
         <div className="row">
           <div className="field" style={{ flex: 1 }}>
             <label htmlFor="name">Name</label>
@@ -156,7 +156,7 @@ export default function ScenariosPage() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Derive one from recorded history</h3>
+        <h2 style={{ marginTop: 0 }}>Derive one from recorded history</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Finds the worst move the underlying&rsquo;s own recorded series
           contains, and records the series, its date range and the date of that
@@ -196,7 +196,7 @@ export default function ScenariosPage() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Available scenarios</h3>
+        <h2 style={{ marginTop: 0 }}>Available scenarios</h2>
         <div className="table-wrap">
           <table>
             <thead>
@@ -236,7 +236,7 @@ export default function ScenariosPage() {
 
       {(portfolios.data ?? []).length > 0 && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Apply one</h3>
+          <h2 style={{ marginTop: 0 }}>Apply one</h2>
           <ul className="reasons">
             {(portfolios.data ?? []).map((item) => (
               <li key={item.id}>

@@ -14,7 +14,7 @@ export default function GlobalSurfacesPage() {
 
   return (
     <>
-      <h2>Global surfaces</h2>
+      <h1>Global surfaces</h1>
       <p className="subtitle">
         SSVI: three shape parameters for the whole surface plus one at-the-money
         variance per expiry. Requiring that variance to be non-decreasing{" "}

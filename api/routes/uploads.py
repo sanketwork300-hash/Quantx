@@ -33,6 +33,7 @@ from domains.market_data.ingestion.layout import (
     LayoutError,
     TwoSidedLayout,
 )
+from domains.market_data.ingestion.parser import DateOrder
 from domains.market_data.service import UploadRejected
 from domains.users.models import AuditAction
 from domains.users.service import UserService
@@ -107,10 +108,16 @@ async def preview_upload(
     user: CurrentUser,
     market_data: MarketDataServiceDep,
 ) -> PreviewResponse:
-    """Show how the file would be interpreted. Persists nothing.
+    """Report how the file was read. Persists nothing.
 
-    Mandatory before ingestion in the UI: a misread column produces a plausible,
-    wrong chain and no error at all, so the user confirms the mapping first.
+    The file is read first and the reading is reported: which column each field
+    came from, the first rows as they were read with the failures kept in, and
+    whether the reading worked at all. Correcting a column is the exception
+    rather than the entry price, because the ordinary user downloaded a chain
+    from an exchange and has nothing to say about its columns.
+
+    Supplying a ``column_mapping`` or ``layout`` re-reads the file that way, so
+    a correction can be seen taking effect before anything is committed.
     """
     upload = await market_data.get_upload(upload_id, user.id)
     if upload is None:
@@ -125,7 +132,13 @@ async def preview_upload(
         layout = _layout(payload.layout)
     except LayoutError as exc:
         raise UnprocessableEntity("INVALID_LAYOUT", str(exc)) from exc
-    preview = await market_data.preview_upload(upload, mapping, limit=payload.limit, layout=layout)
+    preview = await market_data.preview_upload(
+        upload,
+        mapping,
+        limit=payload.limit,
+        layout=layout,
+        date_order=DateOrder(payload.date_order) if payload.date_order else None,
+    )
     return PreviewResponse(**preview.to_dict())
 
 
@@ -240,6 +253,24 @@ async def ingest_upload(
             missing_required=list(missing),
         )
 
+    # Read a sample before accepting the file. The mapping being *complete* only
+    # says every required field points at some column; it does not say the
+    # column holds that field. A file read with the wrong columns produced a
+    # snapshot with almost nothing in it and no error anywhere, which downstream
+    # is indistinguishable from a market with almost nothing in it. The same
+    # rule runs again in the worker over the whole file; refusing here means the
+    # user is told now rather than by a job that fails a minute later.
+    date_order = DateOrder(payload.date_order) if payload.date_order else None
+    verdict = (
+        await market_data.preview_upload(upload, mapping, layout=layout, date_order=date_order)
+    ).verdict
+    if not verdict.readable:
+        raise UnprocessableEntity(
+            str(verdict.problem),
+            verdict.message or "The file could not be read.",
+            **verdict.to_dict(),
+        )
+
     job = await jobs.create(
         user_id=user.id,
         job_type=JobType.INGEST_OPTION_CHAIN,
@@ -254,6 +285,7 @@ async def ingest_upload(
             # reports: a misread layout is plausible rather than loud.
             "layout_detection": detection.to_dict() if detection is not None else None,
             "column_mapping_inferred": mapping_inferred,
+            "date_order": payload.date_order,
             "underlying_price": (
                 format(payload.underlying_price, "f")
                 if payload.underlying_price is not None

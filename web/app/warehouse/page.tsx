@@ -153,7 +153,7 @@ export default function WarehousePage() {
 
   return (
     <>
-      <h2>Historical warehouse</h2>
+      <h1>Historical warehouse</h1>
       <p className="subtitle">
         Partitioned Parquet in the object store, with a registry of what is in
         it. Nothing here is repaired: a suspicious row is flagged and kept, and a
@@ -170,7 +170,7 @@ export default function WarehousePage() {
           ingest.mutate();
         }}
       >
-        <h3 style={{ marginTop: 0 }}>Register a dataset</h3>
+        <h2 style={{ marginTop: 0 }}>Register a dataset</h2>
         <div className="field">
           <label htmlFor="file">CSV or Parquet of OHLCV bars</label>
           <input
@@ -238,7 +238,7 @@ export default function WarehousePage() {
       </form>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Datasets</h3>
+        <h2 style={{ marginTop: 0 }}>Datasets</h2>
         {datasets.data?.length ? (
           <table>
             <thead>
@@ -269,9 +269,9 @@ export default function WarehousePage() {
 
       {selected ? (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>
+          <h2 style={{ marginTop: 0 }}>
             {selected.name} <StatusTag status={selected.status} />
-          </h3>
+          </h2>
 
           {selected.status === "QUARANTINED" ? (
             <p className="muted">
@@ -315,7 +315,7 @@ export default function WarehousePage() {
 
           {findings.data ? (
             <>
-              <h4>What the validator found</h4>
+              <h3>What the validator found</h3>
               {findings.data.findings.length ||
               findings.data.rejected.length ||
               findings.data.excluded.length ? (
@@ -362,7 +362,7 @@ export default function WarehousePage() {
 
           {preview.data ? (
             <>
-              <h4>First rows</h4>
+              <h3>First rows</h3>
               <p className="muted">
                 Read {preview.data.read_path.toLowerCase()} from{" "}
                 {preview.data.partitions_read} partition

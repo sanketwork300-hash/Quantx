@@ -120,7 +120,7 @@ export default function SimulatePage() {
 
   return (
     <>
-      <h2>Execution simulation</h2>
+      <h1>Execution simulation</h1>
       <p className="subtitle">
         What different schedules would have paid on a path the market already
         printed. Every number here is a counterfactual estimate: these schedules
@@ -131,7 +131,7 @@ export default function SimulatePage() {
       <ErrorBanner error={run.error ?? strategies.error ?? impactModels.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>The order</h3>
+        <h2 style={{ marginTop: 0 }}>The order</h2>
         <div className="row">
           <div className="field" style={{ flex: 1 }}>
             <label htmlFor="inst">Contract</label>
@@ -192,7 +192,7 @@ export default function SimulatePage() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Strategies</h3>
+        <h2 style={{ marginTop: 0 }}>Strategies</h2>
         <div className="row">
           {(strategies.data ?? []).map((item) => (
             <button
@@ -230,7 +230,7 @@ export default function SimulatePage() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Market inputs and impact</h3>
+        <h2 style={{ marginTop: 0 }}>Market inputs and impact</h2>
         <div className="row">
           <div className="field" style={{ flex: 1 }}>
             <label htmlFor="model">Impact model</label>
@@ -335,7 +335,7 @@ export default function SimulatePage() {
           <div className="banner warn">{comparison.caveat}</div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Schedules side by side</h3>
+            <h2 style={{ marginTop: 0 }}>Schedules side by side</h2>
             <p className="muted" style={{ marginTop: 0 }}>
               {comparison.comparison_caveat}
             </p>
@@ -383,7 +383,7 @@ export default function SimulatePage() {
 
           {comparison.unavailable.length > 0 && (
             <div className="card">
-              <h3 style={{ marginTop: 0 }}>Strategies that could not run</h3>
+              <h2 style={{ marginTop: 0 }}>Strategies that could not run</h2>
               <ul className="reasons">
                 {comparison.unavailable.map((item) => (
                   <li key={item.strategy}>
@@ -396,7 +396,7 @@ export default function SimulatePage() {
 
           {comparison.strategies.map((item) => (
             <div className="card" key={`detail-${item.strategy}`}>
-              <h3 style={{ marginTop: 0 }}>{item.strategy}</h3>
+              <h2 style={{ marginTop: 0 }}>{item.strategy}</h2>
               <div className="row">
                 <Metric
                   label="Average price"
@@ -426,7 +426,7 @@ export default function SimulatePage() {
 
               {item.unfilled.length > 0 && (
                 <>
-                  <h3>Unfilled slices</h3>
+                  <h2>Unfilled slices</h2>
                   <div className="table-wrap" style={{ maxHeight: 200 }}>
                     <table>
                       <thead>
@@ -452,7 +452,7 @@ export default function SimulatePage() {
 
               {item.fills && item.fills.length > 0 && (
                 <>
-                  <h3>Simulated fills</h3>
+                  <h2>Simulated fills</h2>
                   <div className="table-wrap" style={{ maxHeight: 300 }}>
                     <table>
                       <thead>

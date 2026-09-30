@@ -131,18 +131,87 @@ export interface DetectedLayout {
   suggested_symbol: string | null;
   /** Where a suggestion came from, e.g. "filename". Never a data column. */
   suggestion_source: string | null;
+  /** 0-based line the header sits on; lines above it were not read as data. */
+  header_row: number;
+}
+
+/** Whether a numeric date's first number is the day or the month. */
+export type DateOrder = "DMY" | "MDY";
+
+/** How a column of numeric dates was read, and what settled it. */
+export interface DateReading {
+  field: string;
+  column: string;
+  /** Null, with a `problem`, when nothing in the column settles it. */
+  order: DateOrder | null;
+  stated: boolean;
+  example: string | null;
+  problem: "AMBIGUOUS" | "CONFLICTING" | null;
+}
+
+/** Where a field's column came from. Every field in a reading reports one. */
+export type ReadingSource =
+  | "DETECTED_COLUMN"
+  | "SUPPLIED_COLUMN"
+  | "IMPLIED_BY_POSITION"
+  | "STATED_SEPARATELY"
+  | "NOT_IN_FILE";
+
+export interface ColumnRef {
+  side: "BOTH" | "CALL" | "PUT";
+  header: string | null;
+  index: number | null;
+}
+
+export interface FieldReading {
+  field: string;
+  required: boolean;
+  source: ReadingSource;
+  columns: ColumnRef[];
+  detail: string | null;
+}
+
+/**
+ * One source row as it was read. Rows that could not be read are present, in
+ * file order, with the reason — a sample of the successes alone looks correct
+ * however badly the file was read.
+ */
+export interface SampleRow {
+  row_number: number;
+  read: boolean;
+  values: Record<string, string | null>;
+  problem: string | null;
+  reason: string | null;
+  structural: boolean;
+}
+
+export interface ReadingVerdict {
+  readable: boolean;
+  rows_examined: number;
+  rows_read: number;
+  rows_unreadable: number;
+  rows_empty: number;
+  problem: string | null;
+  message: string | null;
+  reasons: Record<string, number>;
+  missing_required: string[];
+  /** Lines of the file sampled. A two-sided export yields two quotes per line. */
+  source_rows: number | null;
 }
 
 export interface Preview {
   upload_id: string;
   headers: string[];
+  /** How the file was read, field by field. Shown instead of a mapping form. */
+  reading: FieldReading[];
+  verdict: ReadingVerdict;
   inferred_mapping: Record<string, string>;
   applied_mapping: Record<string, string>;
   missing_required: string[];
   unmapped_columns: string[];
-  sample_rows: Record<string, unknown>[];
-  parse_errors: { row_number: number; column: string | null; message: string }[];
+  sample: SampleRow[];
   detected_layout: DetectedLayout | null;
+  date_readings: DateReading[];
 }
 
 export interface Job {

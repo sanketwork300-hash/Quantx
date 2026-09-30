@@ -17,7 +17,7 @@ from __future__ import annotations
 import uuid
 from collections import Counter
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 from domains.instruments.enums import (
@@ -44,8 +44,22 @@ from domains.market_data.ingestion.layout import (
 from domains.market_data.ingestion.layout import (
     split as split_two_sided,
 )
-from domains.market_data.ingestion.parser import ParseResult, TabularParser
+from domains.market_data.ingestion.parser import (
+    DateOrder,
+    ParseResult,
+    TabularParser,
+    detect_delimiter,
+)
+from domains.market_data.ingestion.reading import (
+    ReadingRefused,
+    assess_rejections,
+    describe,
+)
+from domains.market_data.ingestion.reading import (
+    obstacle as reading_obstacle,
+)
 from domains.market_data.ingestion.validator import (
+    NON_OPTION_TOKENS,
     OptionChainRowValidator,
     RejectedRow,
     RejectionReason,
@@ -86,6 +100,12 @@ class IngestionWarningCode:
     LAYOUT_AUTO_DETECTED = "INGESTION_LAYOUT_AUTO_DETECTED"
     MAPPING_INFERRED = "INGESTION_MAPPING_INFERRED"
     EXPIRY_FROM_FILENAME = "INGESTION_EXPIRY_FROM_FILENAME"
+    CONTRACTS_ALREADY_EXPIRED = "INGESTION_CONTRACTS_ALREADY_EXPIRED"
+    OPTIONAL_VALUES_UNREADABLE = "INGESTION_OPTIONAL_VALUES_UNREADABLE"
+    DELIMITER_DETECTED = "INGESTION_DELIMITER_DETECTED"
+    HEADER_ROW_DETECTED = "INGESTION_HEADER_ROW_DETECTED"
+    DATE_ORDER = "INGESTION_DATE_ORDER"
+    TIMESTAMP_TIMEZONE_ASSUMED = "INGESTION_TIMESTAMP_TIMEZONE_ASSUMED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +174,9 @@ class OptionChainIngestionRequest:
     #: in no column, and the filename is the only place it appears; it is read
     #: as a *hint*, reported as one, never as a fact from the data.
     filename: str | None = None
+    #: Whether a numeric date's first number is the day. Needed only when a
+    #: date column does not show it; never assumed when it is not supplied.
+    date_order: DateOrder | None = None
     upload_id: uuid.UUID | None = None
     dataset_digest: str | None = None
     provider: str = "csv"
@@ -193,6 +216,53 @@ class IngestionSummary:
             "rejected_rows": [row.to_dict() for row in self.rejected_rows],
             "expiries": list(self.expiries),
         }
+
+
+class ChainExpiredRefused(ValueError):
+    """Every contract in the file had expired at the as-of, so nothing was written.
+
+    The file was read correctly; it is the as-of that cannot be right, or the
+    chain is one nothing can be computed from. Stored, it would be a snapshot
+    with no usable quote in it that then becomes the underlying's latest chain:
+    no implied volatility, no surface slice, nothing to scan, and no error
+    anywhere near the timestamp that caused it. The as-of is supplied by the
+    caller rather than read from the file, so it is the thing to correct.
+    """
+
+    code = "ALL_CONTRACTS_EXPIRED"
+
+    def __init__(
+        self, expiries: list[str], as_of: datetime, settlement: time | None, quotes: int
+    ) -> None:
+        judged = (
+            f"a settlement time of {settlement.isoformat()} UTC on the expiry date"
+            if settlement is not None
+            else "the expiry date alone, because no settlement time was supplied"
+        )
+        super().__init__(
+            f"All {quotes} quote(s) in this file are for expiry {', '.join(expiries)}, which "
+            f"had already passed at the as-of timestamp {as_of.isoformat()} (judged by "
+            f"{judged}). Nothing was ingested: no implied volatility, surface or deviation "
+            "scan can be solved from an expired contract. Check the as-of timestamp, which "
+            "is supplied by the caller and not read from the file, and set it to when the "
+            "chain was captured."
+        )
+        self.details = {
+            "code": self.code,
+            "expiries": expiries,
+            "as_of_timestamp": as_of.isoformat(),
+            "expiry_time_utc": settlement.isoformat() if settlement is not None else None,
+            "quotes": quotes,
+        }
+
+
+def _is_expired(expiry: date, as_of: datetime, settlement: time | None) -> bool:
+    if settlement is not None:
+        return datetime.combine(expiry, settlement, tzinfo=UTC) <= as_of
+    # With no settlement time the expiry *instant* is unknown, so only a date
+    # strictly in the past is certainly expired. Claiming more would be an
+    # assumption about when the venue settles.
+    return expiry < as_of.date()
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,7 +309,21 @@ class OptionChainIngestionPipeline:
         self._repository = repository
         self._quality_config = quality_config or MarketDataQualityConfig()
         self._quality = MarketDataQualityEngine(self._quality_config)
-        self._parser = TabularParser(OPTION_CHAIN_FIELDS, max_rows=max_rows)
+        # A row is a quote if it has a strike, an expiry, a side and a price.
+        # An optional column that does not hold what its header suggests -- a
+        # ``time`` of ``15:30:00``, a volume of ``1.2K`` -- costs that cell, and
+        # is reported, rather than costing the row and with it the file.
+        #
+        # The order of a numeric date is settled per column rather than per
+        # cell, and a future listed beside the options is a row that is not an
+        # option rather than one that could not be read.
+        self._parser = TabularParser(
+            OPTION_CHAIN_FIELDS,
+            max_rows=max_rows,
+            lenient_optional=True,
+            resolve_date_order=True,
+            non_option_tokens=NON_OPTION_TOKENS,
+        )
         self._code_commit = code_commit
 
     # ----------------------------------------------------------------- read
@@ -300,6 +384,7 @@ class OptionChainIngestionPipeline:
         mapping: ColumnMapping,
         layout: TwoSidedLayout | None,
         limit: int | None = None,
+        date_order: DateOrder | None = None,
     ) -> tuple[ParseResult, tuple[str, ...]]:
         """Turn a file into parsed rows, using an already-resolved layout.
 
@@ -313,7 +398,7 @@ class OptionChainIngestionPipeline:
         mapping alone.
         """
         if layout is None:
-            result = self._parser.parse(data, mapping, limit=limit)
+            result = self._parser.parse(data, mapping, limit=limit, date_order=date_order)
             return result, mapping.unmapped_columns(result.headers)
 
         records, headers = split_two_sided(data, layout)
@@ -322,6 +407,11 @@ class OptionChainIngestionPipeline:
         capped = records if limit is None else records[: limit * 2]
         result = self._parser.parse_records(
             capped, headers, layout.identity_mapping(), limit=None if limit is None else limit * 2
+        )
+        result = replace(
+            result,
+            delimiter=detect_delimiter(data.decode("utf-8-sig", errors="replace")),
+            header_row=layout.header_row,
         )
         claimed = {
             layout.strike_column,
@@ -344,15 +434,15 @@ class OptionChainIngestionPipeline:
         limit: int,
         layout: TwoSidedLayout | None = None,
         filename: str | None = None,
+        date_order: DateOrder | None = None,
     ) -> tuple[ParseResult, tuple[str, ...]]:
         """Parse a sample without persisting anything.
 
-        Mandatory before commit: the user must see how their columns were
-        interpreted, because a misread column produces a plausible, wrong chain
-        and no error at all.
+        The same reading the commit path performs, over the file's first rows,
+        so what the user is shown and what is then ingested cannot diverge.
         """
         plan = self._resolve_reading(data, mapping, layout, filename)
-        result, _ = self._read(data, plan.mapping, plan.layout, limit=limit)
+        result, _ = self._read(data, plan.mapping, plan.layout, limit=limit, date_order=date_order)
         applied = plan.layout.identity_mapping() if plan.layout is not None else plan.mapping
         return result, applied.missing_required(OPTION_CHAIN_FIELDS)
 
@@ -372,8 +462,11 @@ class OptionChainIngestionPipeline:
             request.mapping_inferred,
         )
         layout, detection = plan.layout, plan.detection
-        parse_result, unmapped = self._read(data, plan.mapping, layout)
+        parse_result, unmapped = self._read(
+            data, plan.mapping, layout, date_order=request.date_order
+        )
         rows_input = parse_result.row_count + len(parse_result.errors)
+        self._report_how_the_file_was_split(warnings, parse_result, layout)
 
         if layout is not None:
             warnings.append(
@@ -435,6 +528,32 @@ class OptionChainIngestionPipeline:
                     rows_parsed=parse_result.row_count,
                 )
             )
+        if parse_result.cell_issues:
+            by_column: dict[str, dict] = {}
+            for issue in parse_result.cell_issues:
+                entry = by_column.setdefault(
+                    issue.column,
+                    {
+                        "field": issue.field,
+                        "count": 0,
+                        "example": issue.value,
+                        "first_row": issue.row_number,
+                    },
+                )
+                entry["count"] += 1
+            warnings.append(
+                AnalyticalWarning.warn(
+                    IngestionWarningCode.OPTIONAL_VALUES_UNREADABLE,
+                    f"{len(parse_result.cell_issues)} optional value(s) could not be read "
+                    "and were taken as absent; their rows were kept. "
+                    + " ".join(
+                        f"Column {column!r} ({entry['field']}): {entry['count']} value(s), "
+                        f"e.g. {entry['example']!r} at row {entry['first_row']}."
+                        for column, entry in by_column.items()
+                    ),
+                    columns=by_column,
+                )
+            )
         if unmapped:
             warnings.append(
                 AnalyticalWarning.info(
@@ -462,6 +581,48 @@ class OptionChainIngestionPipeline:
                 rejected.append(outcome)
             else:
                 validated.append(outcome)
+
+        # Whether the file was read at all is settled here, before anything is
+        # created or written. A reading that did not work produces an empty or
+        # near-empty snapshot, and an empty snapshot is indistinguishable
+        # downstream from a market with nothing in it -- every later analysis
+        # takes it at face value. So it is refused, with the diagnosis, rather
+        # than recorded.
+        verdict = assess_rejections(
+            len(validated), rejected, obstacle=reading_obstacle(parse_result)
+        )
+        if not verdict.readable:
+            raise ReadingRefused(
+                verdict,
+                describe(
+                    OPTION_CHAIN_FIELDS,
+                    _applied_mapping(request, plan),
+                    list(parse_result.headers),
+                    supplied=request.column_mapping,
+                    layout=layout,
+                    detected_layout=(detection.two_sided if detection else None),
+                    expiry_source=(
+                        detection.suggestion_source
+                        if detection is not None
+                        and layout is not None
+                        and layout.expiry == detection.suggested_expiry
+                        else None
+                    ),
+                ),
+            )
+
+        # Also settled before anything is written, and for the same reason: a
+        # chain that had wholly expired at the as-of stores as a snapshot with
+        # no usable quote in it.
+        settlement = request.contract.expiry_time_utc
+        expiries = {row.expiry for row in validated}
+        if all(_is_expired(expiry, request.as_of, settlement) for expiry in expiries):
+            raise ChainExpiredRefused(
+                sorted(str(expiry) for expiry in expiries),
+                request.as_of,
+                settlement,
+                len(validated),
+            )
 
         underlying = await self._resolve_underlying(request)
         underlying_price = self._resolve_underlying_price(request, validated, warnings)
@@ -543,6 +704,73 @@ class OptionChainIngestionPipeline:
         return AnalyticalResult.ok(summary, provenance, tuple(warnings))
 
     # ------------------------------------------------------------- internals
+    def _report_how_the_file_was_split(
+        self,
+        warnings: list[AnalyticalWarning],
+        parse_result: ParseResult,
+        layout: TwoSidedLayout | None,
+    ) -> None:
+        """Say what was worked out about the file's shape and its conventions.
+
+        Each of these is a reading the file did not state outright -- which
+        character separates its cells, which line is its header, which number of
+        a date is the day, which offset its timestamps are in. They are reported
+        for the same reason a detected layout is: had any been read wrongly the
+        chain would still look entirely plausible.
+        """
+        if parse_result.delimiter != ",":
+            shown = "a tab" if parse_result.delimiter == "\t" else repr(parse_result.delimiter)
+            warnings.append(
+                AnalyticalWarning.info(
+                    IngestionWarningCode.DELIMITER_DETECTED,
+                    f"The file separates its cells with {shown} rather than a comma, and was "
+                    "split on that.",
+                    delimiter=parse_result.delimiter,
+                )
+            )
+        if layout is None and parse_result.header_row:
+            warnings.append(
+                AnalyticalWarning.info(
+                    IngestionWarningCode.HEADER_ROW_DETECTED,
+                    f"Row {parse_result.header_row + 1} was read as the header. The "
+                    f"{parse_result.header_row} line(s) above it name no fields and were not "
+                    "read as data.",
+                    header_row=parse_result.header_row,
+                )
+            )
+        for reading in parse_result.date_readings:
+            if reading.order is None:
+                continue
+            written = "day first" if reading.order is DateOrder.DAY_FIRST else "month first"
+            basis = (
+                "as stated in the request"
+                if reading.stated
+                else f"because {reading.example!r} reads no other way"
+            )
+            warnings.append(
+                AnalyticalWarning.info(
+                    IngestionWarningCode.DATE_ORDER,
+                    f"Column {reading.column!r} writes its dates as numbers. Every one was "
+                    f"read {written}, {basis}.",
+                    **reading.to_dict(),
+                )
+            )
+        if parse_result.naive_timestamps:
+            columns = ", ".join(
+                f"{column!r} ({count} value(s))"
+                for column, count in parse_result.naive_timestamps.items()
+            )
+            warnings.append(
+                AnalyticalWarning.warn(
+                    IngestionWarningCode.TIMESTAMP_TIMEZONE_ASSUMED,
+                    f"Timestamps in column {columns} state no UTC offset and were read as "
+                    "UTC. That is an assumption, not a fact from the file: an exchange "
+                    "that stamps local time is off by its offset, which moves quote "
+                    "staleness by the same amount.",
+                    columns=dict(parse_result.naive_timestamps),
+                )
+            )
+
     def _apply_carry_assumption(self, request: OptionChainIngestionRequest) -> None:
         """Fold the request's carry assumption into the quality configuration.
 
@@ -828,6 +1056,7 @@ class OptionChainIngestionPipeline:
                     "Every quote in this chain was excluded by the quality policy.",
                 )
             )
+        self._warn_about_expired_contracts(warnings, request, persistable)
         if request.contract.expiry_time_utc is None:
             warnings.append(
                 AnalyticalWarning.info(
@@ -878,6 +1107,49 @@ class OptionChainIngestionPipeline:
                 )
             )
 
+    def _warn_about_expired_contracts(
+        self,
+        warnings: list[AnalyticalWarning],
+        request: OptionChainIngestionRequest,
+        persistable: list[PersistableOptionQuote],
+    ) -> None:
+        """Say at ingest when the as-of timestamp is past the contracts' expiry.
+
+        An expired contract stores perfectly well and then supports nothing: the
+        implied-volatility solver refuses it (`OPTION_EXPIRED`), so the surface
+        has no slice to fit and the scanner has no surface. Left unsaid, the
+        user meets that three screens later as an empty chart.
+
+        The usual cause is not the file. It is an as-of timestamp that was typed
+        or defaulted rather than observed, so the warning names both the dates
+        and the timestamp they were compared against.
+
+        Only ever a *part* of the chain by the time this runs: a chain that had
+        wholly expired was refused before anything was written
+        (:class:`ChainExpiredRefused`).
+        """
+        settlement = request.contract.expiry_time_utc
+        expiries = {item.expiry for item in persistable}
+        gone = sorted(
+            str(expiry) for expiry in expiries if _is_expired(expiry, request.as_of, settlement)
+        )
+        if not gone:
+            return
+
+        quotes = sum(1 for item in persistable if str(item.expiry) in set(gone))
+        message = (
+            f"{quotes} quote(s) at expiry {', '.join(gone)} had already expired at the "
+            f"as-of timestamp {request.as_of.isoformat()}. They are stored as observed, "
+            "but no implied volatility, surface or deviation scan can be solved from "
+            "them, because time to expiry is not positive. Check the as-of timestamp: "
+            "it is supplied by the caller, not read from the file."
+        )
+        warnings.append(
+            AnalyticalWarning.warn(
+                IngestionWarningCode.CONTRACTS_ALREADY_EXPIRED, message, expiries=gone
+            )
+        )
+
     def _build_provenance(
         self,
         request: OptionChainIngestionRequest,
@@ -907,6 +1179,9 @@ class OptionChainIngestionPipeline:
                     else str(ChainLayout.LONG)
                 ),
                 "headers": parse_result.headers,
+                "delimiter": parse_result.delimiter,
+                "header_row": parse_result.header_row,
+                "date_readings": [item.to_dict() for item in parse_result.date_readings],
                 "exclusion_severity_threshold": str(request.options.exclusion_severity_threshold),
                 "create_missing_instruments": request.options.create_missing_instruments,
                 "underlying": {

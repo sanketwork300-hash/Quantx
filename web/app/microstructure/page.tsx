@@ -97,7 +97,7 @@ export default function MicrostructurePage() {
 
   return (
     <>
-      <h2>Order book</h2>
+      <h1>Order book</h1>
       <p className="subtitle">
         Depth snapshots and event tapes, and what they can and cannot answer.
         Every analytic here is gated: a dataset is assessed once when it is
@@ -112,7 +112,7 @@ export default function MicrostructurePage() {
       />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>What a feed has to carry</h3>
+        <h2 style={{ marginTop: 0 }}>What a feed has to carry</h2>
         <div className="table-wrap" style={{ maxHeight: 300 }}>
           <table>
             <thead>
@@ -136,7 +136,7 @@ export default function MicrostructurePage() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Import a dataset</h3>
+        <h2 style={{ marginTop: 0 }}>Import a dataset</h2>
         <div className="row">
           <div className="field" style={{ flex: 1 }}>
             <label htmlFor="inst">Contract</label>
@@ -210,7 +210,7 @@ export default function MicrostructurePage() {
 
       {preview && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>What was read</h3>
+          <h2 style={{ marginTop: 0 }}>What was read</h2>
           <p className="muted" style={{ marginTop: 0 }}>
             Check the columns below before importing. A book whose price and
             size columns were read the wrong way round parses without complaint
@@ -276,7 +276,7 @@ export default function MicrostructurePage() {
             </div>
           </div>
 
-          <h3>What this dataset would support</h3>
+          <h2>What this dataset would support</h2>
           <ul className="reasons">
             {preview.availability.capabilities.map((verdict) => (
               <li key={verdict.capability}>
@@ -304,7 +304,7 @@ export default function MicrostructurePage() {
       )}
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Datasets</h3>
+        <h2 style={{ marginTop: 0 }}>Datasets</h2>
         {datasets.data?.length === 0 && (
           <p className="muted" style={{ marginBottom: 0 }}>
             Nothing imported yet.

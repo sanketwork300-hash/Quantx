@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
-import Link from "next/link";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { AppShell } from "@/components/AppShell";
+import { DISPLAY_BOOTSTRAP } from "@/lib/display";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
@@ -9,51 +10,34 @@ export const metadata: Metadata = {
     "Derivatives valuation, portfolio risk and execution intelligence. Analytics, not advice.",
 };
 
+// Zoom is left to the reader: no maximum scale, no user-scalable=no.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    // The display bootstrap sets data-* attributes on <html> before hydration.
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: DISPLAY_BOOTSTRAP }} />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {/* Atkinson Hyperlegible is drawn for low-vision legibility. If the
+            fonts cannot be fetched the system faces in globals.css stand in. */}
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;600&family=Atkinson+Hyperlegible+Next:wght@400;600;700&family=Michroma&display=swap"
+        />
+      </head>
       <body>
         <Providers>
-          <div className="shell">
-            <aside className="sidebar">
-              <h1>Quant Intelligence</h1>
-              <div className="tagline">Analytics, not advice</div>
-              <nav>
-                <Link href="/">Dashboard</Link>
-                <div className="group">Markets</div>
-                <Link href="/live">Live market</Link>
-                <Link href="/live/options">Live options</Link>
-                <Link href="/markets/chains">Option chains</Link>
-                <Link href="/markets/analyses">Volatility analyses</Link>
-                <Link href="/markets/surfaces">Surfaces</Link>
-                <Link href="/markets/global-surfaces">Global surfaces</Link>
-                <Link href="/markets/consensus">Model consensus</Link>
-                <div className="group">Portfolio</div>
-                <Link href="/portfolios">Portfolios</Link>
-                <Link href="/portfolios/construct">Construction</Link>
-                <Link href="/scenarios">Scenarios</Link>
-                <Link href="/order-analysis">Order analysis</Link>
-                <div className="group">Execution</div>
-                <Link href="/execution">Trade analysis</Link>
-                <Link href="/execution/simulate">Simulation</Link>
-                <Link href="/microstructure">Order book</Link>
-                <Link href="/trading">Paper trading</Link>
-                <div className="group">Data</div>
-                <Link href="/data">Imports</Link>
-                <Link href="/warehouse">Warehouse</Link>
-                <div className="group">Research</div>
-                <Link href="/research">Backtests</Link>
-                <div className="group">Account</div>
-                <Link href="/login">Sign in</Link>
-                <Link href="/connections">Broker connections</Link>
-              </nav>
-            </aside>
-            <main className="main">{children}</main>
-          </div>
+          <AppShell>{children}</AppShell>
         </Providers>
       </body>
     </html>

@@ -41,15 +41,21 @@ async def run_job(job_id: uuid.UUID) -> dict:
             result = await handler(session, job)
     except Exception as exc:
         logger.exception("job_failed", job_id=str(job_id), error=str(exc))
+        payload = {
+            "type": type(exc).__name__,
+            "message": str(exc),
+            "traceback": traceback.format_exc(limit=20),
+        }
+        # A refusal is a diagnosis, not a crash. An exception that carries a
+        # structured ``details`` mapping -- the ingestion pipeline refusing a
+        # file it could not read, for instance -- puts it in the job's error so
+        # the user is told which columns were read and which rows failed,
+        # rather than being handed a stack trace and left to guess.
+        details = getattr(exc, "details", None)
+        if isinstance(details, dict):
+            payload["details"] = details
         async with session_scope() as session:
-            await JobService(session).fail(
-                job_id,
-                {
-                    "type": type(exc).__name__,
-                    "message": str(exc),
-                    "traceback": traceback.format_exc(limit=20),
-                },
-            )
+            await JobService(session).fail(job_id, payload)
         raise
 
     async with session_scope() as session:

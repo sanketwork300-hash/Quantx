@@ -116,7 +116,7 @@ export default function PortfolioPage() {
 
   return (
     <>
-      <h2>{portfolio.data?.name ?? "Portfolio"}</h2>
+      <h1>{portfolio.data?.name ?? "Portfolio"}</h1>
       <p className="subtitle">
         Positions are valued against one market snapshot. Each one records the
         price it used and where that price came from.
@@ -125,7 +125,7 @@ export default function PortfolioPage() {
       <ErrorBanner error={positions.error ?? latest.error ?? value.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Value this portfolio</h3>
+        <h2 style={{ marginTop: 0 }}>Value this portfolio</h2>
         <div className="row">
           <div className="field">
             <label htmlFor="rate">Risk-free rate</label>
@@ -189,7 +189,7 @@ export default function PortfolioPage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Portfolio Greeks</h3>
+            <h2 style={{ marginTop: 0 }}>Portfolio Greeks</h2>
             <div className="grid">
               {(
                 [
@@ -220,7 +220,7 @@ export default function PortfolioPage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>How each position was priced</h3>
+            <h2 style={{ marginTop: 0 }}>How each position was priced</h2>
             <div className="row">
               {Object.entries(valuation.valuation_methods).map(([method, count]) => (
                 <div key={method}>
@@ -236,7 +236,7 @@ export default function PortfolioPage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Grouped</h3>
+            <h2 style={{ marginTop: 0 }}>Grouped</h2>
             <div className="row">
               {DIMENSIONS.map((name) => (
                 <button
@@ -292,7 +292,7 @@ export default function PortfolioPage() {
 
       {detail.data?.results && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Positions, as valued</h3>
+          <h2 style={{ marginTop: 0 }}>Positions, as valued</h2>
           <div className="table-wrap" style={{ maxHeight: 420 }}>
             <table>
               <thead>
@@ -341,7 +341,7 @@ export default function PortfolioPage() {
       )}
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Positions</h3>
+        <h2 style={{ marginTop: 0 }}>Positions</h2>
         <p>
           <Link href={`/portfolios/${portfolioId}/import`}>Import from a file →</Link>
           {"  "}

@@ -30,6 +30,13 @@ Legend: `[x]` shipped · `[ ]` planned
       layout is read the way the preview would read it -- layout first, then
       column mapping -- with what was worked out reported in the result and
       recorded in provenance
+- [x] The reading is reported, not requested: `preview` returns which column
+      every field was read from and whether that was detected or supplied, the
+      first rows as they were read with the unreadable ones kept in, and a
+      verdict on whether the reading worked
+- [x] A file that could not be read is refused rather than ingested into a
+      near-empty snapshot -- checked against the sample on the request and
+      against every row in the worker, by one rule
 - [x] Jobs: model, service, task, status/progress/result API
 - [x] Test infrastructure: unit, integration, quant-validation, regression harness
 
@@ -38,6 +45,17 @@ Legend: `[x]` shipped · `[ ]` planned
 | Criterion | How it is verified |
 | --- | --- |
 | A user can register, log in and call an authenticated route | `tests/integration/test_auth.py` |
+| Every field says which column it was read from | `tests/integration/test_option_chain_ingestion.py::TestThePreviewReportsTheReading` |
+| A corrected column is attributed to the user, not to the platform | `test_a_column_the_user_corrected_is_attributed_to_them`, `test_one_corrected_column_makes_that_field_the_callers` |
+| The sample keeps the rows it could not read | `test_rows_that_could_not_be_read_appear_in_the_sample` |
+| An empty far strike is not counted as a misreading | `test_an_empty_far_strike_is_not_counted_as_a_misreading`, `tests/unit/test_reading_report.py::TestWhichRejectionsCountAgainstTheReading` |
+| A file read with the wrong columns is refused, and nothing is written | `TestAFileThatCouldNotBeReadIsRefused::test_a_column_that_does_not_hold_what_it_was_taken_for_is_refused`, `::test_nothing_was_written_by_the_refusal` |
+| A file that only goes wrong past the sample is refused by the worker | `test_a_file_that_only_goes_wrong_past_the_sample_is_refused_by_the_worker` |
+| The failure is a diagnosis rather than a stack trace | `test_the_failed_job_names_the_columns_it_read_from` |
+| An auto-read chain feeds volatility and surface analysis | `TestAnAutoReadChainFeedsTheRestOfThePlatform` |
+| An exchange export with no spot column still solves implied volatility | `TestTheExchangeExportSupportsTheRestOfThePlatform::test_implied_volatility_solves_without_a_spot_column` |
+| An expired contract is flagged whether or not a spot accompanies it | `test_an_expired_quote_is_flagged_even_with_no_underlying_price` |
+| An as-of past the chain's expiry is called out at ingest, not three screens later | `TestAnAsOfPastTheExpiryIsCalledOut` |
 | A foreign portfolio/upload id returns 404, not 403 | `tests/integration/test_ownership.py` |
 | The instrument master round-trips and is idempotent under re-import | `tests/unit/test_instrument_identity.py` |
 | The same contract yields the same UUID across processes | deterministic uuid5 test |

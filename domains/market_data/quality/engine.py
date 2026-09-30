@@ -95,7 +95,15 @@ class MarketDataQualityEngine:
 
         consistency_multiplier = 1.0
         consistency_multiplier *= self._option_structure(option_quote, flags)
-        consistency_multiplier *= self._option_bounds(option_quote, context, flags)
+        # Asked before the bounds, and independently of them: whether a contract
+        # has expired needs neither an underlying price nor a quoted price, and
+        # the bounds need both.
+        life, time_to_expiry = self._option_life(option_quote, context, flags)
+        consistency_multiplier *= life
+        if time_to_expiry is not None:
+            consistency_multiplier *= self._option_bounds(
+                option_quote, context, flags, time_to_expiry
+            )
 
         if option_quote.underlying_price is None:
             flags.append(
@@ -426,8 +434,53 @@ class MarketDataQualityEngine:
             multiplier *= 0.0
         return multiplier
 
-    def _option_bounds(
+    def _option_life(
         self, option_quote: OptionQuote, context: QuoteContext, flags: list[QualityFlag]
+    ) -> tuple[float, float | None]:
+        """Has this contract already expired at the as-of instant?
+
+        A question about the expiry instant and the as-of timestamp, and about
+        nothing else. It used to be answered inside :meth:`_option_bounds`,
+        which returns early when there is no underlying price -- so a chain with
+        no spot column, which is every two-sided exchange export, stored expired
+        contracts with a clean bill of health and full quality scores. Nothing
+        said a word until the implied-volatility solver refused all of them, at
+        which point there was no smile, no surface slice and nothing to scan,
+        three screens away from the cause.
+
+        Returns the consistency multiplier and the time to expiry the bounds
+        should use, or ``None`` when they must not run at all.
+        """
+        time_to_expiry = option_quote.time_to_expiry_years(context.as_of)
+        if time_to_expiry is None:
+            flags.append(
+                QualityFlag(
+                    QualityCode.UNKNOWN_EXPIRY_TIME,
+                    Severity.INFO,
+                    "Expiry instant unknown; time to expiry is undefined and any "
+                    "bound check discounts with zero time value.",
+                )
+            )
+            return 1.0, 0.0
+        if time_to_expiry <= 0:
+            flags.append(
+                QualityFlag(
+                    QualityCode.OPTION_EXPIRED,
+                    Severity.ERROR,
+                    "Time to expiry is not positive at the requested as_of, so no "
+                    "implied volatility, surface or scan can be solved from this quote.",
+                    {"time_to_expiry_years": float(time_to_expiry)},
+                )
+            )
+            return 0.0, None
+        return 1.0, float(time_to_expiry)
+
+    def _option_bounds(
+        self,
+        option_quote: OptionQuote,
+        context: QuoteContext,
+        flags: list[QualityFlag],
+        t: float,
     ) -> float:
         """Static no-arbitrage bounds on the option's mid price.
 
@@ -457,30 +510,6 @@ class MarketDataQualityEngine:
         price = option_quote.mid_price or option_quote.quote.last_price
         if price is None:
             return 1.0
-
-        time_to_expiry = option_quote.time_to_expiry_years(context.as_of)
-        if time_to_expiry is None:
-            flags.append(
-                QualityFlag(
-                    QualityCode.UNKNOWN_EXPIRY_TIME,
-                    Severity.INFO,
-                    "Expiry instant unknown; bounds computed with zero time value "
-                    "of the discount factors.",
-                )
-            )
-            t = 0.0
-        elif time_to_expiry <= 0:
-            flags.append(
-                QualityFlag(
-                    QualityCode.OPTION_EXPIRED,
-                    Severity.ERROR,
-                    "Time to expiry is not positive at the requested as_of.",
-                    {"time_to_expiry_years": float(time_to_expiry)},
-                )
-            )
-            return 0.0
-        else:
-            t = float(time_to_expiry)
 
         # The carry assumption is reported once per chain by the ingestion
         # pipeline and recorded in provenance, not repeated on every quote; it

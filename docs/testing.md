@@ -293,6 +293,60 @@ not be the unsafe one. `TestIngestingWithNothingSaidAboutTheFile` does the same
 for a long-form file and asserts that the header-name inference is reported
 rather than done quietly.
 
+`tests/integration/test_chain_file_shapes.py` uploads chains the way they
+actually arrive, each with an empty request body: a title above the header,
+semicolons or tabs between the cells, both forms of the NSE bhavcopy with a
+future and another underlying mixed in, headers that say `Call LTP`. Beside
+those sit the files that must *not* be read: a date column that reads two ways
+is refused until `date_order` is stated and is then read that way throughout, a
+field read from a header name used twice is refused, and a decimal comma is set
+aside rather than read as a number a hundred times too large. The unit tests
+under `TestTheOrderOfANumericDateIsSettledPerColumn` include the case that
+matters most for the preview -- the one value that settles a column sitting
+past the sample limit -- because a sample and its file must not read the same
+column two ways.
+
+### Testing the difference between a bad file and a bad reading
+
+`tests/unit/test_reading_report.py` guards one line: a row that could not be
+*read* against a row that is *empty*. Both fail to become a quote, and treating
+them the same breaks the feature in one of two ways — count empty rows against
+the reading and every real exchange chain is refused, because far strikes carry
+no quotes on one side; ignore unreadable rows and a file whose expiry column
+holds prices is ingested as an almost-empty market.
+
+So the classification is parametrised over every rejection reason
+(`test_each_reason_is_classified`), and a companion test asserts that the set of
+reasons is fully partitioned (`test_every_rejection_reason_has_been_considered`)
+— a reason added later has to be classified deliberately rather than falling
+into whichever branch is the default.
+
+The same line separates a sample from a file. `TestAChainThatOpensOnQuietStrikes`
+(`tests/integration/test_two_sided_chain.py`) uploads a chain whose first sixty
+strikes are unquoted on both sides: the preview must call it readable, the
+ingest must be accepted and keep the quotes further down, and a file of
+*nothing but* quiet strikes must still be refused -- by the worker, which is the
+only place that has seen the whole file. `TestAnAsOfPastTheExpiryIsCalledOut`
+pins the other refusal that is not about reading: a wholly expired chain writes
+nothing, a partly expired one is stored with its expired quotes excluded. And
+`TestAnOptionalColumnThatCannotBeReadCostsTheCellNotTheFile` asserts that an
+unreadable optional cell is reported by column rather than rejecting its row.
+
+`TestAFileThatCouldNotBeReadIsRefused` then asserts the consequence rather than
+the mechanism: a chain read with the wrong expiry column returns `422` and
+`/market/chains` is still empty. The refusal is worth an explicit "nothing was
+written" test, because the failure it prevents is not an exception — it is a
+stored snapshot holding four quotes out of forty thousand, which every
+downstream analysis reads as a quiet market.
+
+The last of that class,
+`test_a_file_that_only_goes_wrong_past_the_sample_is_refused_by_the_worker`,
+exists because the rule runs in two places over two different amounts of the
+file. Sixty clean rows followed by four hundred broken ones is accepted by the
+request, which sees fifty, and refused by the worker, which sees all of them. A
+test that only exercised the request path would let the worker's copy of the
+rule rot.
+
 ### Testing that a secret stays a secret
 
 `tests/unit/test_credential_vault.py` and

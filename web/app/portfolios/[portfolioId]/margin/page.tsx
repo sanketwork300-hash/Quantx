@@ -85,7 +85,7 @@ export default function MarginPage() {
 
   return (
     <>
-      <h2>Margin — {portfolio.data?.name ?? "portfolio"}</h2>
+      <h1>Margin — {portfolio.data?.name ?? "portfolio"}</h1>
       <p className="subtitle">
         An estimate from a model defined in this repository, under assumptions
         you can read. It is not your broker&rsquo;s margin requirement, which this
@@ -95,7 +95,7 @@ export default function MarginPage() {
       <ErrorBanner error={run.error ?? models.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Model</h3>
+        <h2 style={{ marginTop: 0 }}>Model</h2>
         <div className="row">
           <div className="field" style={{ flex: 1 }}>
             <label htmlFor="model">Margin model</label>
@@ -122,7 +122,7 @@ export default function MarginPage() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Inputs</h3>
+        <h2 style={{ marginTop: 0 }}>Inputs</h2>
         <div className="row">
           <div className="field">
             <label htmlFor="rate">Risk-free rate</label>
@@ -231,7 +231,7 @@ export default function MarginPage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>What this says</h3>
+            <h2 style={{ marginTop: 0 }}>What this says</h2>
             <p>{margin.summary}</p>
             {margin.in_shortfall_at_rest && (
               <div className="banner error">
@@ -242,7 +242,7 @@ export default function MarginPage() {
 
           {margin.eligible_capital !== null && (
             <div className="card">
-              <h3 style={{ marginTop: 0 }}>Estimated buffer across the ladder</h3>
+              <h2 style={{ marginTop: 0 }}>Estimated buffer across the ladder</h2>
               <BufferCurve
                 ladder={margin.ladder}
                 downside={margin.shortfall_region.downside}
@@ -253,7 +253,7 @@ export default function MarginPage() {
           )}
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>How the estimate is built</h3>
+            <h2 style={{ marginTop: 0 }}>How the estimate is built</h2>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -286,7 +286,7 @@ export default function MarginPage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Assumptions</h3>
+            <h2 style={{ marginTop: 0 }}>Assumptions</h2>
             <ul className="reasons">
               {margin.margin.assumptions.map((item) => (
                 <li key={item}>{item}</li>
@@ -299,7 +299,7 @@ export default function MarginPage() {
 
           {margin.eligible_capital !== null && (
             <div className="card">
-              <h3 style={{ marginTop: 0 }}>The ladder</h3>
+              <h2 style={{ marginTop: 0 }}>The ladder</h2>
               <div className="table-wrap" style={{ maxHeight: 380 }}>
                 <table>
                   <thead>

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, time
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -53,6 +53,9 @@ class PreviewRequest(APIModel):
     #: Omit to use the detected layout. The detection is always returned with
     #: its evidence so the user can confirm or override it.
     layout: TwoSidedLayoutIn | None = None
+    #: Whether a numeric date's first number is the day (``DMY``) or the month
+    #: (``MDY``). Needed only when the preview reports ``AMBIGUOUS_DATE_ORDER``.
+    date_order: Literal["DMY", "MDY"] | None = None
     limit: int = Field(default=50, ge=1, le=500)
 
 
@@ -68,18 +71,102 @@ class DetectedLayoutOut(APIModel):
     suggested_symbol: str | None = None
     #: Where a suggestion came from, e.g. "filename". Never a data column.
     suggestion_source: str | None = None
+    #: 0-based line the header sits on; lines above it were not read as data.
+    header_row: int = 0
+
+
+class ColumnRefOut(APIModel):
+    """One column a field is read from, named the way the file names it."""
+
+    side: str
+    header: str | None = None
+    index: int | None = None
+
+
+class FieldReadingOut(APIModel):
+    """Which column a field was read from, and whether that was said or worked out.
+
+    ``source`` is the honest part: ``DETECTED_COLUMN`` means the platform worked
+    it out, ``SUPPLIED_COLUMN`` means the caller named it, ``NOT_IN_FILE`` means
+    no column carries it. A reading a user never corrected still says so.
+    """
+
+    field: str
+    required: bool
+    source: str
+    columns: list[ColumnRefOut] = Field(default_factory=list)
+    detail: str | None = None
+
+
+class SampleRowOut(APIModel):
+    """One source row as it was read, whether or not the reading worked.
+
+    Rows that could not be read are present, in file order, with the reason.
+    Showing only the rows that parsed is what made the old sample misleading: it
+    looked correct however badly the file was read.
+    """
+
+    row_number: int
+    read: bool
+    values: dict[str, str | None] = Field(default_factory=dict)
+    problem: str | None = None
+    reason: str | None = None
+    structural: bool = False
+
+
+class ReadingVerdictOut(APIModel):
+    """Whether the sample could be read, with the counts that decided it.
+
+    ``rows_examined == rows_read + rows_unreadable + rows_empty``. A row that
+    could not be *read* is one whose column does not hold what it was taken to
+    hold; a row that is *empty* is a far strike with no quotes on that side,
+    which every exchange chain carries and which is not a reading failure.
+    """
+
+    readable: bool
+    rows_examined: int
+    rows_read: int
+    rows_unreadable: int
+    rows_empty: int
+    problem: str | None = None
+    message: str | None = None
+    reasons: dict[str, int] = Field(default_factory=dict)
+    missing_required: list[str] = Field(default_factory=list)
+    #: Lines of the file the counts came from. A two-sided export yields two
+    #: quotes per line, so the counts above are quotes and this is lines.
+    source_rows: int | None = None
+
+
+class DateReadingOut(APIModel):
+    """How a column of numeric dates was read, and what settled it.
+
+    ``order`` is ``None`` with a ``problem`` when nothing settled it: the file
+    is then refused until the request states ``date_order``.
+    """
+
+    field: str
+    column: str
+    order: str | None = None
+    stated: bool = False
+    example: str | None = None
+    problem: str | None = None
 
 
 class PreviewResponse(APIModel):
     upload_id: uuid.UUID
     headers: list[str]
+    #: The reading itself, field by field. The client shows this rather than an
+    #: empty mapping form: the file is read first, and correcting the reading is
+    #: the exception rather than the entry price.
+    reading: list[FieldReadingOut]
+    verdict: ReadingVerdictOut
     inferred_mapping: dict[str, str]
     applied_mapping: dict[str, str]
     missing_required: list[str]
     unmapped_columns: list[str]
-    sample_rows: list[dict[str, Any]]
-    parse_errors: list[dict[str, Any]]
+    sample: list[SampleRowOut]
     detected_layout: DetectedLayoutOut | None = None
+    date_readings: list[DateReadingOut] = Field(default_factory=list)
 
 
 class UnderlyingSpecIn(APIModel):
@@ -117,6 +204,8 @@ class IngestRequest(APIModel):
     column_mapping: dict[str, str] = Field(default_factory=dict)
     #: Present for a two-sided chain export. Confirm it from the preview.
     layout: TwoSidedLayoutIn | None = None
+    #: See ``PreviewRequest.date_order``. Never assumed when omitted.
+    date_order: Literal["DMY", "MDY"] | None = None
     underlying_price: DecimalStr | None = None
     #: Supplying both enables the carry-dependent option bound checks
     #: (including the sub-intrinsic check). Omitting them keeps the checks

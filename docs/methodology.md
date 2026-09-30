@@ -47,6 +47,18 @@ Example of the required framing:
   lists. The convention used is recorded per calculation.
 - `T <= 0` is not a number to clamp. It is a structured non-result
   (`OPTION_EXPIRED`).
+- Whether `T <= 0` is asked on its own, from the expiry instant and the as-of
+  timestamp and nothing else. It used to be answered inside the no-arbitrage
+  bound check, which returns early when no underlying price accompanies the
+  quote — so a chain with no spot column, which is *every* two-sided exchange
+  export, stored expired contracts at full quality scores and was refused by the
+  implied-volatility solver two screens later with no earlier sign. The two
+  questions are unrelated and are now separate checks.
+- A chain whose every contract had expired at the as-of is not ingested
+  (`ALL_CONTRACTS_EXPIRED`). The as-of is supplied by the caller rather than
+  read from the file, so a wholly expired chain is far more often a wrong
+  timestamp than an old file, and stored it is a snapshot nothing can be solved
+  from. A partly expired chain is stored, with the expired quotes excluded.
 
 ### 2.2 Rates and discounting
 
@@ -119,7 +131,7 @@ mapping runs afterwards on records that already know their side. Detection
 a header row carries exactly one strike column, a block containing at least one
 price on each side of it, and no option-type column anywhere; the reading and
 the evidence for it are returned to the user in the preview, on the same
-footing as an inferred column mapping, and confirmed before any commit.
+footing as an inferred column mapping, and are open to correction there.
 
 The same two steps run on the commit path, but only as a fallback: when a
 request names no layout and carries no mapping at all, the file is read the way
@@ -136,6 +148,62 @@ What was worked out is reported with the result
 and `INGESTION_MAPPING_INFERRED`, carrying the matched mapping) and recorded in
 `provenance.parameters`, so the reading that produced a snapshot is always
 recoverable from the snapshot.
+
+The preview reports that reading rather than asking for one. Each field says
+which column it came from and whether that column was detected or supplied;
+attribution is per column, so a user who corrects one column sees that column
+as theirs and the rest still reported as the platform's reading. The sample is
+the file's first rows *in order, with the unreadable ones kept in* — a sample
+of the rows that parsed looks correct however badly the file was read, because
+the rows that would prove otherwise are exactly the ones it omits.
+
+### What is inferred from a file, and what is not
+
+The line is between a file's *structure* and its *values*. Structure is
+evidence the file carries about itself -- which character separates its cells,
+which line names its columns, which side a header says it belongs to -- and is
+read off the file and reported. A value is only ever what a cell holds.
+
+Where a cell's text admits two values, none is picked:
+
+- A numeric date's order is settled once per column, by a value that reads only
+  one way, and then applied to every row. With no such value the column is not
+  read until the caller states the order. Reading each cell by the first format
+  that fits is what let one column come out day-first in some rows and
+  month-first in others.
+- A comma is removed from a number only where it groups digits in threes or in
+  the Indian pattern. Anything else is refused rather than repaired.
+- A timestamp without an offset is read as UTC and the result says so, because
+  that one *is* an assumption and staleness moves with it.
+- An integer field does not truncate a fraction.
+
+### A reading that did not work is an error, not an empty snapshot
+
+Ingestion refuses a file it could not read: no snapshot, no instruments, no
+quality report. The reason is that an almost-empty snapshot is
+*indistinguishable downstream* from an almost-empty market. Every later
+analysis — implied volatility, the surface fit, the anomaly scan — takes a
+stored snapshot at face value and reports a quiet chain rather than a failed
+import.
+
+The rule turns on a distinction the row accounting already makes. A row that
+could not be **read** is one whose column does not hold what it was taken to
+hold: unparseable, or missing a strike, an expiry or an option type. A row that
+is **empty** carries no price on that side, which every exchange chain does at
+its far strikes and which says nothing about the reading. Only the first kind
+counts. Counting the second would refuse legitimate downloads; ignoring the
+first would accept misread ones.
+
+A file is refused when a required field resolves to no column, when it carries
+no data rows, when not one row became a quote, or when more than half its rows
+failed structurally. The majority threshold is a policy and the refusal message
+states it: misreadings are all-or-nothing — a column either holds expiries or it
+does not — while genuinely dirty data is a minority of rows in a file that
+otherwise reads. The same rule runs twice, against the sampled rows when the
+request arrives so the answer is immediate, and against every row in the worker
+because a file can read cleanly for fifty rows and not for the next fifty
+thousand. The failed job carries the diagnosis — the verdict, its counts and the
+column each field was read from — rather than a stack trace.
 
 Four conventions follow:
 

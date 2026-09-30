@@ -14,7 +14,7 @@ export default function SurfacesPage() {
 
   return (
     <>
-      <h2>Volatility surfaces</h2>
+      <h1>Volatility surfaces</h1>
       <p className="subtitle">
         Each surface is content-addressed: two rows with the same id were fitted
         from the same numbers, so a provenance record naming one identifies

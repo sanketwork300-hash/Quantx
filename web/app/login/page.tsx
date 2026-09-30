@@ -36,7 +36,7 @@ export default function LoginPage() {
   if (signedIn) {
     return (
       <>
-        <h2>Account</h2>
+        <h1>Account</h1>
         <p className="subtitle">You are signed in.</p>
         <button
           className="secondary"
@@ -53,7 +53,7 @@ export default function LoginPage() {
 
   return (
     <>
-      <h2>Sign in</h2>
+      <h1>Sign in</h1>
       <p className="subtitle">
         Portfolios, uploads and jobs are scoped to your account.
       </p>

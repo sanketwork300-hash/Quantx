@@ -154,10 +154,18 @@ class TestOwnership:
             json={
                 "underlying": {"symbol": "NIFTY", "exchange": "SYNTH"},
                 "as_of_timestamp": "2026-09-24T09:20:00Z",
+                # A price column is part of a workable mapping, not decoration:
+                # a mapping that names none produces no observation from any
+                # row, and ingestion now refuses that rather than storing an
+                # empty snapshot. This test is about ownership, so it hands
+                # over a file that actually reads.
                 "column_mapping": {
                     "strike": "STRIKE_PRICE",
                     "option_type": "CE_PE",
                     "expiry": "EXPIRY_DT",
+                    "bid_price": "BID",
+                    "ask_price": "ASK",
+                    "last_price": "LTP",
                 },
             },
         )

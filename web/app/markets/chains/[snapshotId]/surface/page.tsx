@@ -42,7 +42,7 @@ function ScopePanel({
   const clean = report.violations_total === 0;
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>
+      <h2 style={{ marginTop: 0 }}>
         {title}{" "}
         {clean ? (
           <span className="tag good">no violations</span>
@@ -51,7 +51,7 @@ function ScopePanel({
             {report.violations_total} violation{report.violations_total === 1 ? "" : "s"}
           </span>
         )}
-      </h3>
+      </h2>
       <p className="muted" style={{ marginTop: 0 }}>
         {meaning}
       </p>
@@ -112,12 +112,12 @@ function SlicePanel({ slice }: { slice: SurfaceSlice }) {
   const params = slice.parameters;
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>
+      <h2 style={{ marginTop: 0 }}>
         {slice.expiry}{" "}
         <span className={`tag ${metrics.status === "CONVERGED" ? "good" : "warn"}`}>
           {metrics.status}
         </span>
-      </h3>
+      </h2>
 
       {!params ? (
         <div className="banner warn">Not fitted: {metrics.error ?? "no parameters"}</div>
@@ -130,7 +130,7 @@ function SlicePanel({ slice }: { slice: SurfaceSlice }) {
             <Metric label="Forward" value={slice.forward.toFixed(2)} unit={slice.forward_method ?? ""} />
           </div>
 
-          <h3>Parameters (raw SVI)</h3>
+          <h2>Parameters (raw SVI)</h2>
           <p className="muted" style={{ marginTop: 0, fontSize: 11 }}>
             w(k) = a + b[ρ(k − m) + √((k − m)² + σ²)]. These five numbers, the
             forward and the maturity are all a reference value depends on — the
@@ -159,7 +159,7 @@ function SlicePanel({ slice }: { slice: SurfaceSlice }) {
             </tbody>
           </table>
 
-          <h3>Admissibility</h3>
+          <h2>Admissibility</h2>
           <table>
             <tbody>
               <tr>
@@ -282,7 +282,7 @@ export default function SurfacePage() {
 
   return (
     <>
-      <h2>Volatility surface</h2>
+      <h1>Volatility surface</h1>
       <p className="subtitle">
         Raw SVI fitted per expiry, with the no-arbitrage conditions imposed as
         constraints rather than checked afterwards. Everything here is a model
@@ -300,7 +300,7 @@ export default function SurfacePage() {
       <ErrorBanner error={run.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Calibrate</h3>
+        <h2 style={{ marginTop: 0 }}>Calibrate</h2>
         <div className="row">
           <button onClick={() => run.mutate()} disabled={!analysisId || run.isPending}>
             {run.isPending ? "Submitting…" : "Fit SVI"}
@@ -340,13 +340,13 @@ export default function SurfacePage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Observed and fitted</h3>
+            <h2 style={{ marginTop: 0 }}>Observed and fitted</h2>
             <SurfaceChart observed={observed} fitted={fitted.slices} />
           </div>
 
           {reports && (
             <>
-              <h3>Arbitrage diagnostics</h3>
+              <h2>Arbitrage diagnostics</h2>
               <p className="muted" style={{ marginTop: 0 }}>
                 Reported in two scopes and never merged. A smooth fit must not be
                 able to hide a broken market, and a broken fit must not be
@@ -365,7 +365,7 @@ export default function SurfacePage() {
             </>
           )}
 
-          <h3>Slices</h3>
+          <h2>Slices</h2>
           {fitted.slices.map((slice) => (
             <SlicePanel key={slice.expiry} slice={slice} />
           ))}

@@ -456,13 +456,167 @@ measured over eleven minutes reads exactly like one measured over a session.
 | --- | --- | --- |
 | POST | `/uploads` | multipart; `kind=OPTION_CHAIN\|POSITIONS\|TRADES`; stores to object store, returns `upload_id` |
 | GET | `/uploads/{id}` | status + validation summary |
-| POST | `/uploads/{id}/preview` | parse first N rows with a candidate column mapping; **no persistence** |
+| POST | `/uploads/{id}/preview` | read the first N rows and report how they were read; **no persistence** |
 | POST | `/uploads/{id}/ingest` | run the ingestion pipeline; returns a `job_id` |
 
-Preview-before-import is mandatory in the UI: users must see how their columns
-were interpreted before any row is committed.
+### 7.0 The preview is a reading report, not a mapping form **[P0]**
+
+The file is read first. `preview` answers "here is how this file was read, and
+here is whether that worked" rather than asking the user to describe their own
+download. Three fields carry that answer.
+
+**`reading`** — one entry per field, saying which column it came from and
+whether that column was worked out or named:
+
+```http
+{"reading": [
+  {"field": "strike", "required": true, "source": "DETECTED_COLUMN",
+   "columns": [{"side": "BOTH", "header": "STRIKE_PRICE", "index": 1}], "detail": null},
+  {"field": "bid_price", "required": false, "source": "SUPPLIED_COLUMN",
+   "columns": [{"side": "CALL", "header": "BID", "index": 8},
+               {"side": "PUT", "header": "BID", "index": 13}], "detail": null},
+  {"field": "sequence_number", "required": false, "source": "NOT_IN_FILE",
+   "columns": [], "detail": "No column in this file carries it, so it is not read."}
+]}
+```
+
+| `source` | Meaning |
+| --- | --- |
+| `DETECTED_COLUMN` | the platform matched this column to the field |
+| `SUPPLIED_COLUMN` | the caller named this column, and is not overridden |
+| `IMPLIED_BY_POSITION` | two-sided export: the side is which block the column sits in |
+| `STATED_SEPARATELY` | not in the file at all (a two-sided export's expiry) |
+| `NOT_IN_FILE` | no column carries it; it is not read, and says so |
+
+Attribution is per column, not per file: a caller who corrects one column sees
+that column as theirs and the rest still reported as the platform's reading.
+
+**`sample`** — the file's first rows *in file order, failures included*:
+
+```http
+{"sample": [
+  {"row_number": 1, "read": true,
+   "values": {"strike": "22600", "option_type": "CALL", "expiry": "2026-10-29"},
+   "problem": null, "reason": null, "structural": false},
+  {"row_number": 2, "read": false, "values": {"strike": "22600"},
+   "problem": "column 'EXPIRY_DT': unrecognised date: '1562.85'",
+   "reason": "UNPARSEABLE_ROW", "structural": true}
+]}
+```
+
+Only mapped fields appear, and a row that could not be read is shown with its
+reason rather than omitted. A sample built from the rows that parsed is the
+misleading artefact this replaces: it looks correct however badly the file was
+read, because the rows that would prove otherwise are exactly the ones it leaves
+out.
+
+**`verdict`** — whether the reading worked, with the counts that decided it:
+
+```http
+{"verdict": {"readable": false, "rows_examined": 50, "rows_read": 0,
+             "rows_unreadable": 50, "rows_empty": 0,
+             "problem": "NO_ROW_COULD_BE_READ",
+             "message": "Not one row of the first 50 row(s) could become a quote ...",
+             "reasons": {"UNPARSEABLE_ROW": 50}, "missing_required": []}}
+```
+
+`rows_examined == rows_read + rows_unreadable + rows_empty`, always. The
+distinction between the last two is the point of the verdict: a row that could
+not be **read** is one whose column does not hold what it was taken to hold; a
+row that is **empty** is a far strike with nothing quoted on that side, which
+every exchange chain carries and which is not a reading failure.
+
+### 7.0.1 A file that could not be read is refused **[P0]**
+
+`ingest` refuses rather than committing a snapshot it could not fill. It is
+checked twice: on the request, against the sampled rows, so the answer is
+immediate; and in the worker, against every row, because a file can read cleanly
+for fifty rows and not for the next fifty thousand.
+
+The structural rules decide both the same way. The one rule a sample does not
+apply is "not one row became a quote": an exchange chain opens on far strikes
+where neither side is quoted, so a sample holding only empty rows is where the
+file starts, not a reading that failed. Such a sample is `readable` with
+`rows_read: 0` and a `message` saying the whole file decides; a sample in which
+nothing was read *and* most rows failed structurally is still refused. The
+verdict's `source_rows` is the number of file lines sampled -- a two-sided
+export yields two quotes per line, so the other counts are quotes.
+
+| Code | Raised when |
+| --- | --- |
+| `COLUMN_MAPPING_INCOMPLETE` | a required field points at no column at all |
+| `REQUIRED_FIELD_NOT_FOUND` | the reading resolved no column for a required field |
+| `FILE_HAS_NO_DATA_ROWS` | the file carries a header and nothing else |
+| `NO_ROW_COULD_BE_READ` | not one row of the whole file became a quote |
+| `MOST_ROWS_COULD_NOT_BE_READ` | more than half the rows failed structurally |
+| `ALL_CONTRACTS_EXPIRED` | every contract had expired at `as_of_timestamp` (worker only; `error.details` carries `{code, expiries, as_of_timestamp, expiry_time_utc, quotes}`) |
+
+| `AMBIGUOUS_DATE_ORDER` | a date column writes numeric dates and nothing settles whether the day or the month comes first; state `date_order` |
+| `AMBIGUOUS_COLUMN` | a field is read from a header name the file uses more than once |
+
+A row is refused for a required field it cannot supply. An *optional* cell that
+cannot be read -- a `time` column holding `15:30:00`, a volume of `1.2K` -- is
+taken as absent and the row is kept; the result warns
+`INGESTION_OPTIONAL_VALUES_UNREADABLE` with, per column, the field, the count,
+an example value and the first row it occurred on.
+
+On the request path these are `422` carrying the whole verdict. In the worker
+the job ends `FAILED` and `error.details` carries `{code, verdict, reading}` --
+the diagnosis, not a stack trace -- so the user is told which column was taken
+for which field and how many rows failed on each reason.
+
+The majority rule is a policy and is stated in the refusal message. It is set
+where it is because misreadings are all-or-nothing -- a column either holds
+expiries or it does not -- while genuinely dirty data is a minority of rows in
+an otherwise readable file.
+
+Nothing is written by a refusal: no snapshot, no instruments, no quality report.
+That is the whole point. A snapshot holding four quotes out of forty thousand is
+indistinguishable downstream from a market with four quotes in it, and every
+later analysis takes it at face value.
+
+### 7.0.2 What is read off the file, and what is never chosen for it **[P0]**
+
+Four things about a file's shape are worked out rather than asked for, and each
+is reported in the ingest result's warnings and recorded in
+`provenance.parameters`:
+
+| Worked out | How | Reported as |
+| --- | --- | --- |
+| the delimiter | comma, tab or semicolon, whichever splits the first lines into the most cells consistently; a tie goes to the comma | `INGESTION_DELIMITER_DETECTED`, `parameters.delimiter` |
+| the header row | the line among the first eight that names the most fields, so a title above the header is not taken for it | `INGESTION_HEADER_ROW_DETECTED`, `parameters.header_row`, `detected_layout.header_row` |
+| the order of a numeric date | from a value in the column that reads only one way (`29/10/2026`), applied to the whole column | `INGESTION_DATE_ORDER`, `parameters.date_readings`, and `date_readings` in the preview |
+| a timestamp's offset | a timestamp stating none is read as UTC | `INGESTION_TIMESTAMP_TIMEZONE_ASSUMED` (a warning: it is an assumption) |
+
+Header names are matched for the exchange's own files as well as the common
+spellings: NSE's F&O bhavcopy in both its legacy form (`STRIKE_PR`,
+`OPTION_TYP`, `EXPIRY_DT`, `OPEN_INT`) and its newer one (`StrkPric`, `OptnTp`,
+`XpryDt`, `ClsPric`, `OpnIntrst`, `TckrSymb`, `UndrlygPric`). A row such a file
+marks as a future (`XX`) is rejected as `NOT_AN_OPTION`, which does not count
+against the reading.
+
+Three things are **not** chosen on the user's behalf, because each produces a
+plausible chain and no error:
+
+* **A date that reads two ways.** When no value in a date column says whether
+  the day or the month comes first, the file is refused with
+  `AMBIGUOUS_DATE_ORDER` until the request carries `date_order` (`"DMY"` or
+  `"MDY"`, accepted by both `preview` and `ingest`). A column is read one way
+  throughout; it is never day-first in one row and month-first in the next.
+* **A comma that is not a thousands separator.** `1,877.00` and `12,34,567` are
+  grouped numbers. `24000,50` is not, and is refused rather than read as
+  2,400,050.
+* **One of two columns with the same name.** A field read from a header name
+  that occurs twice is refused with `AMBIGUOUS_COLUMN`.
+
+A value that is not whole is not truncated into an integer field.
 
 ### 7.1 Two-sided chain exports **[P0]**
+
+The sides are told apart by the headers where they name their own side -- `Call
+LTP` / `Put LTP`, `CE OI` / `PE OI`, `C_BID` / `P_BID`, as a prefix or a suffix
+-- and otherwise by position, calls left of the strike and puts right of it. A
+header that names its side is believed over where its column sits.
 
 Every retail chain download -- NSE's option-chain page included -- is arranged
 one row per *strike* rather than one row per quote:
@@ -552,7 +706,10 @@ Four properties of this path are deliberate:
   filename and in no column. The preview offers the filename's date as a
   labelled `suggestion_source: "filename"`; on commit that same hint is applied
   and reported, because the alternative is rejecting every row of a readable
-  file. A file whose name carries no date is refused with
+  file. The date is read as `15-Sep-2026`, `15SEP2026`, `2026-09-15` or
+  `15-09-2026`; a name carrying two different dates, or a numeric date that
+  reads as day-month or month-day, suggests nothing, and `evidence` says why.
+  A file whose name carries no usable date is refused with
   `LAYOUT_EXPIRY_REQUIRED` rather than dated with something plausible -- a wrong
   expiry silently moves every contract along the term structure. Supplying
   `layout` explicitly still requires `layout.expiry`.
@@ -602,7 +759,21 @@ guessed:
 | `contract.multiplier` | recorded as `1` with a `MULTIPLIER_ASSUMED` flag and a warning. Greeks and margin scale with it, so it is never inferred from a symbol. |
 | `contract.expiry_time_utc` | the expiry *instant* stays unknown, so time to expiry is undefined and carry-dependent checks are skipped. |
 | `risk_free_rate` / `dividend_yield` | only the assumption-free option bounds run (`C <= S`, `P <= K`, `price >= 0`). Sub-intrinsic pricing is **not** checked, because without a discount curve a deep in-the-money European put legitimately trades below `K - S`. |
-| `underlying_price` | a chain export usually carries no spot column, so the spot must be supplied or `INGESTION_MISSING_UNDERLYING_PRICE` is raised and moneyness-dependent checks are skipped. |
+| `underlying_price` | a chain export usually carries no spot column, so the spot must be supplied or `INGESTION_MISSING_UNDERLYING_PRICE` is raised and moneyness-dependent checks are skipped. Implied volatility is still solvable: the forward is recovered from put-call parity on the quotes themselves. |
+
+`as_of_timestamp` is the caller's, not the file's — nothing in a chain export
+states when it was captured. When it falls at or after an expiry the file
+carries, every quote of that expiry is flagged `OPTION_EXPIRED`, excluded with
+that reason, and the ingestion warns `INGESTION_CONTRACTS_ALREADY_EXPIRED`
+naming the dates and the timestamp they were compared against. Those quotes are
+stored as observed.
+
+When it falls past *every* expiry in the file, the ingestion is refused with
+`ALL_CONTRACTS_EXPIRED` and nothing is written: the snapshot would hold no
+usable quote and would become the underlying's latest chain. With
+`contract.expiry_time_utc` supplied, an expiry has passed at that instant on the
+expiry date; without it only a date strictly before the as-of date counts,
+because the expiry instant is unknown.
 
 ## 7a. Historical warehouse **[P3-realtime]**
 

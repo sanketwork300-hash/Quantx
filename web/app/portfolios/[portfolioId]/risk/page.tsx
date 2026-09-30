@@ -134,7 +134,7 @@ export default function RiskPage() {
 
   return (
     <>
-      <h2>Risk — {portfolio.data?.name ?? "portfolio"}</h2>
+      <h1>Risk — {portfolio.data?.name ?? "portfolio"}</h1>
       <p className="subtitle">
         Value at Risk and scenario stress, both computed by fully repricing the
         book. Nothing here is a recommendation, and no number is a prediction.
@@ -143,7 +143,7 @@ export default function RiskPage() {
       <ErrorBanner error={runVar.error ?? runStress.error ?? scenarios.error} />
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Market context</h3>
+        <h2 style={{ marginTop: 0 }}>Market context</h2>
         <div className="row">
           <div className="field">
             <label htmlFor="rate">Risk-free rate</label>
@@ -166,7 +166,7 @@ export default function RiskPage() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Value at Risk</h3>
+        <h2 style={{ marginTop: 0 }}>Value at Risk</h2>
         <div className="row">
           {METHODS.map((item) => (
             <button
@@ -241,7 +241,7 @@ export default function RiskPage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>What this number rests on</h3>
+            <h2 style={{ marginTop: 0 }}>What this number rests on</h2>
             <div className="grid">
               <div>
                 <div className="muted">Method</div>
@@ -311,7 +311,7 @@ export default function RiskPage() {
 
           {risk.worst_scenario_dates.length > 0 && (
             <div className="card">
-              <h3 style={{ marginTop: 0 }}>The recorded days that hurt most</h3>
+              <h2 style={{ marginTop: 0 }}>The recorded days that hurt most</h2>
               <ul className="reasons">
                 {risk.worst_scenario_dates.map((day) => (
                   <li key={day} className="mono">
@@ -325,7 +325,7 @@ export default function RiskPage() {
       )}
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Stress lab</h3>
+        <h2 style={{ marginTop: 0 }}>Stress lab</h2>
         <div className="row">
           <div className="field" style={{ flex: 1 }}>
             <label htmlFor="scenario">Scenario</label>
@@ -417,7 +417,7 @@ export default function RiskPage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Why both numbers are here</h3>
+            <h2 style={{ marginTop: 0 }}>Why both numbers are here</h2>
             <p className="muted" style={{ marginTop: 0 }}>
               {stress.greek_approximation.caveat} The estimate uses{" "}
               <span className="mono">{stress.greek_approximation.method}</span>.
@@ -440,9 +440,9 @@ export default function RiskPage() {
 
           {stress.contributions.map((breakdown) => (
             <div className="card" key={breakdown.dimension}>
-              <h3 style={{ marginTop: 0 }}>
+              <h2 style={{ marginTop: 0 }}>
                 Contribution by {breakdown.dimension.toLowerCase().replace(/_/g, " ")}
-              </h3>
+              </h2>
               <div className="table-wrap">
                 <table>
                   <thead>
@@ -483,7 +483,7 @@ export default function RiskPage() {
           ))}
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Positions after the shock</h3>
+            <h2 style={{ marginTop: 0 }}>Positions after the shock</h2>
             <div className="table-wrap" style={{ maxHeight: 380 }}>
               <table>
                 <thead>

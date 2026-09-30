@@ -14,7 +14,7 @@ export default function ChainListPage() {
 
   return (
     <>
-      <h2>Option chain snapshots</h2>
+      <h1>Option chain snapshots</h1>
       <p className="subtitle">
         Each ingestion is its own observation snapshot. Observations are
         append-only: re-importing never overwrites what was previously observed.
@@ -59,9 +59,15 @@ export default function ChainListPage() {
                       "—"
                     )}
                   </td>
-                  <td>
-                    <Link href={`/markets/chains/${snapshot.snapshot_id}`}>
-                      Open
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <Link href={`/markets/chains/${snapshot.snapshot_id}`}>Open</Link>
+                    {" · "}
+                    <Link href={`/markets/chains/${snapshot.snapshot_id}/smile`}>
+                      Implied vol
+                    </Link>
+                    {" · "}
+                    <Link href={`/markets/chains/${snapshot.snapshot_id}/surface`}>
+                      Surface
                     </Link>
                   </td>
                 </tr>

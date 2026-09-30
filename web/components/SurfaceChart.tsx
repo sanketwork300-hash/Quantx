@@ -3,7 +3,14 @@
 import { useMemo, useState } from "react";
 import type { ImpliedVolPoint, SmileSlice, SurfaceSlice } from "@/lib/types";
 
-const SERIES_COLOURS = ["#4c9aff", "#3fb950", "#d29922", "#f778ba", "#a371f7"];
+// Theme tokens, so each series clears 3:1 on white and on dark grey alike.
+const SERIES_COLOURS = [
+  "var(--series-1)",
+  "var(--series-2)",
+  "var(--series-3)",
+  "var(--series-4)",
+  "var(--series-5)",
+];
 
 type Axis = "iv" | "variance";
 

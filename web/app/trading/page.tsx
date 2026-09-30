@@ -331,7 +331,7 @@ export default function TradingPage() {
                     ) : null}
                   </p>
                 ))}
-                <h4>Pre-trade checks</h4>
+                <h3>Pre-trade checks</h3>
                 <Gate checks={outcome.gate.checks} />
               </div>
             ) : null}

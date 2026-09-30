@@ -15,9 +15,10 @@ import type {
 const PERCENTILES = ["0.05", "0.25", "0.5", "0.75", "0.95"];
 
 function heat(value: number | null, min: number, max: number): string {
-  if (value === null) return "repeating-linear-gradient(45deg,#1c2128,#1c2128 4px,#262c36 4px,#262c36 8px)";
+  if (value === null) return "repeating-linear-gradient(45deg,var(--panel-2),var(--panel-2) 4px,var(--border) 4px,var(--border) 8px)";
   const t = max > min ? (value - min) / (max - min) : 0.5;
-  return `hsl(${(1 - t) * 210}, 62%, ${28 + t * 26}%)`;
+  // Dark enough throughout that the white figures on it stay above 4.5:1.
+  return `hsl(${(1 - t) * 210}, 62%, ${22 + t * 8}%)`;
 }
 
 export default function GlobalSurfacePage() {
@@ -60,13 +61,13 @@ export default function GlobalSurfacePage() {
 
   return (
     <>
-      <h2>Global surface</h2>
+      <h1>Global surface</h1>
       <ErrorBanner error={surface.error} />
 
       {results && (
         <>
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>SSVI</h3>
+            <h2 style={{ marginTop: 0 }}>SSVI</h2>
             <div className="grid">
               <Metric label="rho" value={results.parameters?.rho.toFixed(4) ?? "—"} />
               <Metric label="eta" value={results.parameters?.eta.toFixed(4) ?? "—"} />
@@ -92,7 +93,7 @@ export default function GlobalSurfacePage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>At-the-money variance term structure</h3>
+            <h2 style={{ marginTop: 0 }}>At-the-money variance term structure</h2>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -133,7 +134,7 @@ export default function GlobalSurfacePage() {
 
       {grid && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Dupire local volatility</h3>
+          <h2 style={{ marginTop: 0 }}>Dupire local volatility</h2>
           <p className="muted" style={{ marginTop: 0 }}>
             {grid.valid_points} of {grid.total_points} grid points carry a value.
             The hatched cells are where Dupire&apos;s denominator vanishes and
@@ -162,7 +163,7 @@ export default function GlobalSurfacePage() {
                         <td
                           key={index}
                           title={value === null ? "no value: Dupire's denominator vanishes here" : value.toFixed(4)}
-                          style={{ background: heat(value, min, max), textAlign: "center" }}
+                          style={{ background: heat(value, min, max), color: "#fff", textAlign: "center" }}
                         >
                           {value === null ? "" : value.toFixed(3)}
                         </td>
@@ -186,7 +187,7 @@ export default function GlobalSurfacePage() {
 
       {densities.data && densities.data.length > 0 && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Risk-neutral density</h3>
+          <h2 style={{ marginTop: 0 }}>Risk-neutral density</h2>
           <p className="muted" style={{ marginTop: 0 }}>
             The distribution the option market is pricing under, not a forecast
             of where the underlying will go. Quantiles are shown only where the
@@ -231,7 +232,7 @@ export default function GlobalSurfacePage() {
 
       {heston.data && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Heston</h3>
+          <h2 style={{ marginTop: 0 }}>Heston</h2>
           <div className="grid">
             <Metric label="v0" value={heston.data.v0?.toFixed(4) ?? "—"} />
             <Metric label="kappa" value={heston.data.kappa?.toFixed(4) ?? "—"} />

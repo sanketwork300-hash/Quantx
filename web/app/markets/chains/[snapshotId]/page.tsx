@@ -45,7 +45,7 @@ export default function ChainDetailPage() {
 
   return (
     <>
-      <h2>Chain snapshot</h2>
+      <h1>Chain snapshot</h1>
       <p className="subtitle">
         Observed quotes with their data-quality scores. Excluded quotes are
         shown, never hidden, and each carries the reason it was set aside.
@@ -74,6 +74,20 @@ export default function ChainDetailPage() {
                 style={{ textDecoration: "none" }}
               >
                 Implied volatility →
+              </Link>
+              <Link
+                className="button"
+                href={`/markets/chains/${params.snapshotId}/surface`}
+                style={{ textDecoration: "none" }}
+              >
+                Surface and arbitrage →
+              </Link>
+              <Link
+                className="button"
+                href={`/markets/chains/${params.snapshotId}/scanner`}
+                style={{ textDecoration: "none" }}
+              >
+                Surface deviations →
               </Link>
               <div className="field" style={{ marginBottom: 0 }}>
                 <label htmlFor="expiry">Expiry</label>
@@ -157,9 +171,9 @@ export default function ChainDetailPage() {
             </div>
 
             <div className="card" style={{ width: 380, flex: "0 0 380px" }}>
-              <h3 style={{ marginTop: 0 }}>
+              <h2 style={{ marginTop: 0 }}>
                 {selected ? "Why this score?" : "Select a quote"}
-              </h3>
+              </h2>
               {selected ? (
                 <>
                   <p className="mono">
@@ -185,7 +199,7 @@ export default function ChainDetailPage() {
           </div>
 
           <div className="card" style={{ marginTop: 16 }}>
-            <h3 style={{ marginTop: 0 }}>Provenance</h3>
+            <h2 style={{ marginTop: 0 }}>Provenance</h2>
             <p className="muted" style={{ marginTop: 0 }}>
               What this snapshot was computed from, so it can be reproduced later.
             </p>

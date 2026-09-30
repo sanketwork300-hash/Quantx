@@ -73,7 +73,7 @@ export default function ConstructPage() {
 
   return (
     <>
-      <h2>Portfolio construction</h2>
+      <h1>Portfolio construction</h1>
       <p className="subtitle">
         A target portfolio from a covariance estimated over warehouse history,
         with the risk of the portfolio that came back reported beside it.
@@ -184,9 +184,9 @@ export default function ConstructPage() {
       {result ? (
         <>
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>
+            <h2 style={{ marginTop: 0 }}>
               Target portfolio <ReturnSource source={result.return_source} />
-            </h3>
+            </h2>
             <table>
               <thead>
                 <tr>
@@ -210,7 +210,7 @@ export default function ConstructPage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Risk of this portfolio</h3>
+            <h2 style={{ marginTop: 0 }}>Risk of this portfolio</h2>
             <table>
               <tbody>
                 <tr>
@@ -255,7 +255,7 @@ export default function ConstructPage() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>How it was solved</h3>
+            <h2 style={{ marginTop: 0 }}>How it was solved</h2>
             <p className="muted">
               Covariance: {String(result.covariance.estimator)} over{" "}
               {String(result.covariance.observations)} observations
@@ -276,7 +276,7 @@ export default function ConstructPage() {
 
           {optimise.data?.warnings.length ? (
             <div className="card">
-              <h3 style={{ marginTop: 0 }}>What the run wants you to know</h3>
+              <h2 style={{ marginTop: 0 }}>What the run wants you to know</h2>
               {optimise.data.warnings.map((warning, index) => (
                 <div key={`${warning.code}-${index}`} style={{ marginBottom: 6 }}>
                   <span className="mono">{warning.code}</span>

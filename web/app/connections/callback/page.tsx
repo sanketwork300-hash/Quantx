@@ -46,7 +46,7 @@ function Callback() {
   if (providerError) {
     return (
       <>
-        <h2>Connection not completed</h2>
+        <h1>Connection not completed</h1>
         <p className="subtitle">
           The provider returned <span className="mono">{providerError}</span>{" "}
           instead of an authorization code. Nothing was stored.
@@ -59,7 +59,7 @@ function Callback() {
   if (!code || !state) {
     return (
       <>
-        <h2>Connection not completed</h2>
+        <h1>Connection not completed</h1>
         <p className="subtitle">
           This page was opened without an authorization code, so there is
           nothing to exchange.
@@ -71,7 +71,7 @@ function Callback() {
 
   return (
     <>
-      <h2>Finishing the connection</h2>
+      <h1>Finishing the connection</h1>
       <ErrorBanner error={complete.error} />
       {complete.isPending ? (
         <p className="subtitle">Exchanging the authorization code…</p>

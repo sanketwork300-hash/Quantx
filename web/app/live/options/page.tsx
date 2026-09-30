@@ -58,7 +58,7 @@ function CaptureSummary({ result }: { result: LiveOptionsResult }) {
   const capture = result.capture;
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>What was captured</h3>
+      <h2 style={{ marginTop: 0 }}>What was captured</h2>
       <table>
         <tbody>
           <tr>
@@ -217,7 +217,7 @@ export default function LiveOptionsPage() {
 
   return (
     <>
-      <h2>Live options</h2>
+      <h1>Live options</h1>
       <p className="subtitle">
         Capture the live chain, solve implied volatilities, fit the surface, and
         read its shape. One captured moment feeds all four, so every number
@@ -287,7 +287,7 @@ export default function LiveOptionsPage() {
 
       {job.data?.error ? (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>The job failed</h3>
+          <h2 style={{ marginTop: 0 }}>The job failed</h2>
           <p className="muted">{JSON.stringify(job.data.error)}</p>
         </div>
       ) : null}
@@ -299,7 +299,7 @@ export default function LiveOptionsPage() {
 
           {payload.analysis ? (
             <div className="card">
-              <h3 style={{ marginTop: 0 }}>Implied volatilities</h3>
+              <h2 style={{ marginTop: 0 }}>Implied volatilities</h2>
               <p className="muted">
                 {payload.analysis.counts.solved} solved from{" "}
                 {payload.analysis.counts.quotes} quotes across{" "}
@@ -310,7 +310,7 @@ export default function LiveOptionsPage() {
 
           {payload.greeks ? (
             <div className="card">
-              <h3 style={{ marginTop: 0 }}>Greeks</h3>
+              <h2 style={{ marginTop: 0 }}>Greeks</h2>
               <p className="muted">
                 {payload.greeks.counts.priced} contracts priced,{" "}
                 {payload.greeks.counts.unavailable} without Greeks. Measured
@@ -350,7 +350,7 @@ export default function LiveOptionsPage() {
 
           {payload.delta_skew ? (
             <div className="card">
-              <h3 style={{ marginTop: 0 }}>Skew and smile</h3>
+              <h2 style={{ marginTop: 0 }}>Skew and smile</h2>
               <p className="muted">
                 Risk reversal and butterfly at {payload.delta_skew.levels
                   .map((level) => `${level * 100}Δ`)
@@ -374,7 +374,7 @@ export default function LiveOptionsPage() {
 
           {openInterest.data ? (
             <div className="card">
-              <h3 style={{ marginTop: 0 }}>Open interest</h3>
+              <h2 style={{ marginTop: 0 }}>Open interest</h2>
               <p className="muted">
                 Counts as the venue reported them, unnormalised — some exchanges
                 publish open interest in contracts and some in units of the

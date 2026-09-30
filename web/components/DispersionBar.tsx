@@ -3,10 +3,10 @@
 import type { ModelValue } from "@/lib/types";
 
 const COLOURS: Record<string, string> = {
-  BLACK_SCHOLES_MERTON: "#4c9aff",
-  LOCAL_VOL_PDE: "#3fb950",
-  HESTON: "#d29922",
-  MONTE_CARLO: "#f778ba",
+  BLACK_SCHOLES_MERTON: "var(--series-1)",
+  LOCAL_VOL_PDE: "var(--series-2)",
+  HESTON: "var(--series-3)",
+  MONTE_CARLO: "var(--series-4)",
 };
 
 interface Props {
@@ -63,7 +63,7 @@ export function DispersionBar({ values, referenceValue, marketPrice }: Props) {
         y={margin.top - 6}
         width={Math.max(x(modelHigh) - x(modelLow), 1)}
         height={axisY - margin.top + 12}
-        fill="#4c9aff"
+        fill="var(--series-1)"
         opacity={0.13}
       />
       <line
@@ -71,7 +71,7 @@ export function DispersionBar({ values, referenceValue, marketPrice }: Props) {
         x2={width - margin.right}
         y1={axisY}
         y2={axisY}
-        stroke="#39414d"
+        stroke="var(--border-strong)"
       />
 
       {referenceValue !== null && (
@@ -80,7 +80,7 @@ export function DispersionBar({ values, referenceValue, marketPrice }: Props) {
           x2={x(referenceValue)}
           y1={margin.top - 6}
           y2={axisY + 6}
-          stroke="#8b949e"
+          stroke="var(--muted)"
           strokeDasharray="3 3"
         />
       )}
@@ -91,13 +91,13 @@ export function DispersionBar({ values, referenceValue, marketPrice }: Props) {
             cx={x(value.value as number)}
             cy={margin.top + 14 + index * 16}
             r={5}
-            fill={COLOURS[value.model] ?? "#a371f7"}
+            fill={COLOURS[value.model] ?? "var(--series-5)"}
           />
           <text
             x={x(value.value as number) + 9}
             y={margin.top + 18 + index * 16}
             fontSize={10}
-            fill="#c9d1d9"
+            fill="var(--text)"
           >
             {value.model.replaceAll("_", " ").toLowerCase()}
           </text>
@@ -109,28 +109,28 @@ export function DispersionBar({ values, referenceValue, marketPrice }: Props) {
           <path
             d={`M ${x(marketPrice)} ${axisY - 9} l 7 9 l -7 9 l -7 -9 Z`}
             fill="none"
-            stroke="#f0f6fc"
+            stroke="var(--text)"
             strokeWidth={1.5}
           />
-          <text x={x(marketPrice)} y={axisY + 32} fontSize={10} fill="#f0f6fc" textAnchor="middle">
+          <text x={x(marketPrice)} y={axisY + 32} fontSize={10} fill="var(--text)" textAnchor="middle">
             observed mid
           </text>
         </g>
       )}
 
-      <text x={margin.left} y={height - 8} fontSize={10} fill="#8b949e">
+      <text x={margin.left} y={height - 8} fontSize={10} fill="var(--muted)">
         {min.toFixed(4)}
       </text>
       <text
         x={width - margin.right}
         y={height - 8}
         fontSize={10}
-        fill="#8b949e"
+        fill="var(--muted)"
         textAnchor="end"
       >
         {max.toFixed(4)}
       </text>
-      <text x={x(referenceValue)} y={16} fontSize={10} fill="#8b949e" textAnchor="middle">
+      <text x={x(referenceValue)} y={16} fontSize={10} fill="var(--muted)" textAnchor="middle">
         median {referenceValue.toFixed(4)}
       </text>
     </svg>

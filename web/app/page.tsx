@@ -28,7 +28,7 @@ export default function Dashboard() {
 
   return (
     <>
-      <h2>Dashboard</h2>
+      <h1>Dashboard</h1>
       <p className="subtitle">
         What is this position approximately worth, what risk does it add, and
         what will it probably cost to execute?
@@ -62,7 +62,7 @@ export default function Dashboard() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Where the platform is</h3>
+        <h2 style={{ marginTop: 0 }}>Where the platform is</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Phases 0 to 9 are complete: the instrument master and ingestion
           pipeline, implied volatilities and forwards, SVI surface calibration,
