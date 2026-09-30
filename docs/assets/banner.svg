@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="1200" height="320" role="img" aria-label="Quant Intelligence Platform: a volatility smile is fitted through quoted options and one quote is flagged as a deviation from the surface.">
+<title>Quant Intelligence Platform: a volatility smile is fitted through quoted options and one quote is flagged as a deviation from the surface.</title>
+<style>
+  .bg{fill:#ffffff;stroke:#d3d7dd} .plate{fill:#f4f5f7;stroke:#7c838d}
+  .ink{fill:#1d2025} .muted{fill:#565c66} .dot{fill:#c9ced5}
+  .line{stroke:#1d2025;fill:none} .soft{stroke:#7c838d;fill:none} .hair{stroke:#d3d7dd;fill:none}
+  .solid{fill:#1d2025} .onsolid{fill:#ffffff} .mark{fill:#b42318} .markline{stroke:#b42318;fill:none}
+  text{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif}
+  @media (prefers-color-scheme: dark){
+    .bg{fill:#26292e;stroke:#41464e} .plate{fill:#30343a;stroke:#8a919b}
+    .ink{fill:#f2f3f5} .muted{fill:#b4bac3} .dot{fill:#3a3f47}
+    .line{stroke:#f2f3f5} .soft{stroke:#8a919b} .hair{stroke:#41464e}
+    .solid{fill:#f2f3f5} .onsolid{fill:#1c1e22} .mark{fill:#ff8a80} .markline{stroke:#ff8a80}
+  }
+  @media (prefers-reduced-motion: reduce){ *{animation:none !important} }
+
+  .curve{stroke-width:3;stroke-linecap:round;stroke-dasharray:530;stroke-dashoffset:0;animation:draw 10s ease-in-out infinite}
+  @keyframes draw{0%{stroke-dashoffset:530}26%,92%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+  .q{animation:pop 10s ease-out infinite both}
+  @keyframes pop{0%{opacity:0;transform:translateY(6px)}7%,84%{opacity:1;transform:none}92%,100%{opacity:0}}
+  .out{animation:pop 10s ease-out 2.6s infinite both}
+  .ring{transform-origin:913.0px 176.9px;animation:ring 2.2s ease-out 3.4s infinite}
+  @keyframes ring{0%{transform:scale(.5);opacity:.9}100%{transform:scale(2.3);opacity:0}}
+</style>
+<defs><pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" class="dot"/></pattern></defs><path class="bg" d="M0.5 0.5H1172L1199.5 28V319.5H0.5Z"/><path fill="url(#g)" d="M1 1H1172L1199 28V319H1Z"/>
+<text class="ink" x="56" y="122" font-size="42" font-weight="700" letter-spacing="-0.5">Quant Intelligence</text>
+<text class="ink" x="56" y="170" font-size="42" font-weight="300" letter-spacing="-0.5">Platform</text>
+<text class="muted" x="56" y="218" font-size="19">Derivatives valuation, portfolio risk</text>
+<text class="muted" x="56" y="244" font-size="19">and execution intelligence.</text>
+<path class="solid" d="M56 266h178l10 10v22H56Z"/>
+<text class="onsolid" x="70" y="289" font-size="16" font-weight="700">Analytics, not advice</text>
+<path class="hair" d="M640 262H1150M640 60V262"/>
+<text class="muted" x="1150" y="288" font-size="14" text-anchor="end">log-moneyness</text>
+<text class="muted" x="650" y="52" font-size="14">implied volatility</text>
+<path class="line curve" d="M660.0 88.0 L664.0 92.4 L668.0 96.8 L672.0 101.1 L676.0 105.3 L680.0 109.4 L684.0 113.5 L688.0 117.6 L692.0 121.5 L696.0 125.4 L700.0 129.3 L704.0 133.0 L708.0 136.7 L712.0 140.4 L716.0 143.9 L720.0 147.4 L724.0 150.9 L728.0 154.2 L732.0 157.6 L736.0 160.8 L740.0 164.0 L744.0 167.1 L748.0 170.1 L752.0 173.1 L756.0 176.0 L760.0 178.9 L764.0 181.7 L768.0 184.4 L772.0 187.1 L776.0 189.6 L780.0 192.2 L784.0 194.6 L788.0 197.0 L792.0 199.3 L796.0 201.6 L800.0 203.8 L804.0 205.9 L808.0 208.0 L812.0 210.0 L816.0 212.0 L820.0 213.8 L824.0 215.6 L828.0 217.4 L832.0 219.0 L836.0 220.7 L840.0 222.2 L844.0 223.7 L848.0 225.1 L852.0 226.4 L856.0 227.7 L860.0 228.9 L864.0 230.1 L868.0 231.2 L872.0 232.2 L876.0 233.2 L880.0 234.1 L884.0 234.9 L888.0 235.6 L892.0 236.3 L896.0 237.0 L900.0 237.5 L904.0 238.0 L908.0 238.5 L912.0 238.8 L916.0 239.1 L920.0 239.4 L924.0 239.6 L928.0 239.7 L932.0 239.7 L936.0 239.7 L940.0 239.6 L944.0 239.4 L948.0 239.2 L952.0 238.9 L956.0 238.6 L960.0 238.2 L964.0 237.7 L968.0 237.1 L972.0 236.5 L976.0 235.9 L980.0 235.1 L984.0 234.3 L988.0 233.4 L992.0 232.5 L996.0 231.5 L1000.0 230.4 L1004.0 229.3 L1008.0 228.1 L1012.0 226.8 L1016.0 225.5 L1020.0 224.1 L1024.0 222.6 L1028.0 221.1 L1032.0 219.5 L1036.0 217.9 L1040.0 216.2 L1044.0 214.4 L1048.0 212.5 L1052.0 210.6 L1056.0 208.6 L1060.0 206.6 L1064.0 204.4 L1068.0 202.3 L1072.0 200.0 L1076.0 197.7 L1080.0 195.3 L1084.0 192.9 L1088.0 190.4 L1092.0 187.8 L1096.0 185.2 L1100.0 182.5 L1104.0 179.7 L1108.0 176.9 L1112.0 174.0 L1116.0 171.0 L1120.0 168.0"/>
+<g class="q" style="animation-delay:0.90s"><path class="soft" stroke-width="1.5" d="M683.0 100.4V130.6M679.0 100.4h8M679.0 130.6h8"/><circle class="solid" cx="683.0" cy="115.5" r="4.5"/></g><g class="q" style="animation-delay:1.03s"><path class="soft" stroke-width="1.5" d="M729.0 137.8V164.4M725.0 137.8h8M725.0 164.4h8"/><circle class="solid" cx="729.0" cy="151.1" r="4.5"/></g><g class="q" style="animation-delay:1.16s"><path class="soft" stroke-width="1.5" d="M775.0 179.5V202.5M771.0 179.5h8M771.0 202.5h8"/><circle class="solid" cx="775.0" cy="191.0" r="4.5"/></g><g class="q" style="animation-delay:1.29s"><path class="soft" stroke-width="1.5" d="M821.0 202.6V222.0M817.0 202.6h8M817.0 222.0h8"/><circle class="solid" cx="821.0" cy="212.3" r="4.5"/></g><g class="q" style="animation-delay:1.42s"><path class="soft" stroke-width="1.5" d="M867.0 227.0V242.8M863.0 227.0h8M863.0 242.8h8"/><circle class="solid" cx="867.0" cy="234.9" r="4.5"/></g><g class="q" style="animation-delay:1.68s"><path class="soft" stroke-width="1.5" d="M959.0 230.6V250.0M955.0 230.6h8M955.0 250.0h8"/><circle class="solid" cx="959.0" cy="240.3" r="4.5"/></g><g class="q" style="animation-delay:1.81s"><path class="soft" stroke-width="1.5" d="M1005.0 213.5V236.5M1001.0 213.5h8M1001.0 236.5h8"/><circle class="solid" cx="1005.0" cy="225.0" r="4.5"/></g><g class="q" style="animation-delay:1.94s"><path class="soft" stroke-width="1.5" d="M1051.0 200.8V227.4M1047.0 200.8h8M1047.0 227.4h8"/><circle class="solid" cx="1051.0" cy="214.1" r="4.5"/></g><g class="q" style="animation-delay:2.07s"><path class="soft" stroke-width="1.5" d="M1097.0 167.4V197.6M1093.0 167.4h8M1093.0 197.6h8"/><circle class="solid" cx="1097.0" cy="182.5" r="4.5"/></g>
+<g class="out">
+  <circle class="markline ring" cx="913.0" cy="176.9" r="9" stroke-width="2"/>
+  <circle class="mark" cx="913.0" cy="176.9" r="5"/>
+  <path class="markline" stroke-width="1.5" stroke-dasharray="3 4" d="M913.0 184.9V234.9"/>
+  <text class="ink" x="929.0" y="166.9" font-size="15" font-weight="700">surface deviation</text>
+  <text class="muted" x="929.0" y="185.9" font-size="13">measured, never rated</text>
+</g>
+</svg>

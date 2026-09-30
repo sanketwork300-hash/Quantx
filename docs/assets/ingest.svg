@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 270" width="1200" height="270" role="img" aria-label="Four steps: upload a file, the file is read, it is ingested or refused, then analysed.">
+<title>Four steps: upload a file, the file is read, it is ingested or refused, then analysed.</title>
+<style>
+  .bg{fill:#ffffff;stroke:#d3d7dd} .plate{fill:#f4f5f7;stroke:#7c838d}
+  .ink{fill:#1d2025} .muted{fill:#565c66} .dot{fill:#c9ced5}
+  .line{stroke:#1d2025;fill:none} .soft{stroke:#7c838d;fill:none} .hair{stroke:#d3d7dd;fill:none}
+  .solid{fill:#1d2025} .onsolid{fill:#ffffff} .mark{fill:#b42318} .markline{stroke:#b42318;fill:none}
+  text{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif}
+  @media (prefers-color-scheme: dark){
+    .bg{fill:#26292e;stroke:#41464e} .plate{fill:#30343a;stroke:#8a919b}
+    .ink{fill:#f2f3f5} .muted{fill:#b4bac3} .dot{fill:#3a3f47}
+    .line{stroke:#f2f3f5} .soft{stroke:#8a919b} .hair{stroke:#41464e}
+    .solid{fill:#f2f3f5} .onsolid{fill:#1c1e22} .mark{fill:#ff8a80} .markline{stroke:#ff8a80}
+  }
+  @media (prefers-reduced-motion: reduce){ *{animation:none !important} }
+
+  .step{opacity:0;animation:step 8s ease-in-out infinite}
+  @keyframes step{0%{opacity:0}4%,22%{opacity:1}28%,100%{opacity:0}}
+  .arrow{stroke-dasharray:4 5;animation:flow 0.9s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-9}}
+</style>
+<defs><pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" class="dot"/></pattern></defs><path class="bg" d="M0.5 0.5H1172L1199.5 28V269.5H0.5Z"/><path fill="url(#g)" d="M1 1H1172L1199 28V269H1Z"/>
+<path class="plate" d="M36 50H282L294 62V200H36Z"/>
+<path class="line step" style="animation-delay:0s" stroke-width="3" d="M36 50H282L294 62V200H36Z"/>
+<circle class="solid" cx="64" cy="84" r="15"/>
+<text class="onsolid" x="64" y="90" font-size="17" font-weight="700" text-anchor="middle">1</text>
+<text class="ink" x="90" y="91" font-size="19" font-weight="700">Upload</text>
+<text class="muted" x="52" y="136" font-size="15">Drop in the chain as the</text>
+<text class="muted" x="52" y="158" font-size="15">exchange exported it.</text>
+<path class="soft arrow" stroke-width="2" d="M298 125.0H318"/>
+<path class="solid" d="M316 120.0l8 5l-8 5Z"/>
+<path class="plate" d="M324 50H570L582 62V200H324Z"/>
+<path class="line step" style="animation-delay:2s" stroke-width="3" d="M324 50H570L582 62V200H324Z"/>
+<circle class="solid" cx="352" cy="84" r="15"/>
+<text class="onsolid" x="352" y="90" font-size="17" font-weight="700" text-anchor="middle">2</text>
+<text class="ink" x="378" y="91" font-size="19" font-weight="700">The file is read</text>
+<text class="muted" x="340" y="136" font-size="15">Layout, delimiter, header</text>
+<text class="muted" x="340" y="158" font-size="15">row and date order detected.</text>
+<path class="soft arrow" stroke-width="2" d="M586 125.0H606"/>
+<path class="solid" d="M604 120.0l8 5l-8 5Z"/>
+<path class="plate" d="M612 50H858L870 62V200H612Z"/>
+<path class="line step" style="animation-delay:4s" stroke-width="3" d="M612 50H858L870 62V200H612Z"/>
+<circle class="solid" cx="640" cy="84" r="15"/>
+<text class="onsolid" x="640" y="90" font-size="17" font-weight="700" text-anchor="middle">3</text>
+<text class="ink" x="666" y="91" font-size="19" font-weight="700">Ingested or refused</text>
+<text class="muted" x="628" y="136" font-size="15">rows in = kept + excluded</text>
+<text class="muted" x="628" y="158" font-size="15">+ rejected, each with a reason.</text>
+<path class="soft arrow" stroke-width="2" d="M874 125.0H894"/>
+<path class="solid" d="M892 120.0l8 5l-8 5Z"/>
+<path class="plate" d="M900 50H1146L1158 62V200H900Z"/>
+<path class="line step" style="animation-delay:6s" stroke-width="3" d="M900 50H1146L1158 62V200H900Z"/>
+<circle class="solid" cx="928" cy="84" r="15"/>
+<text class="onsolid" x="928" y="90" font-size="17" font-weight="700" text-anchor="middle">4</text>
+<text class="ink" x="954" y="91" font-size="19" font-weight="700">Analyse</text>
+<text class="muted" x="916" y="136" font-size="15">Implied volatility, surface,</text>
+<text class="muted" x="916" y="158" font-size="15">deviation scan, portfolio risk.</text>
+<text class="muted" x="36" y="238" font-size="14">Nothing is said about the file. What was detected is shown before anything is stored, and a file that cannot be read one way is refused.</text>
+</svg>
